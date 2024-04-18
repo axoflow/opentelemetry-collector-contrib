@@ -35,7 +35,7 @@ type attrCounter struct {
 	count uint64
 }
 
-func (c *counter[K]) update(ctx context.Context, attrs pcommon.Map, tCtx K) error {
+func (c *counter[K]) update(ctx context.Context, attrs pcommon.Map, resourceAttrs pcommon.Map, tCtx K) error {
 	var multiError error
 	for name, md := range c.metricDefs {
 		countAttrs := pcommon.NewMap()
@@ -62,6 +62,33 @@ func (c *counter[K]) update(ctx context.Context, attrs pcommon.Map, tCtx K) erro
 				case float64:
 					if v != 0 {
 						countAttrs.PutDouble(attr.Key, float64(v))
+					}
+				}
+			}
+		}
+		for _, resAttr := range md.resourceAttrs {
+			if resAttrVal, ok := resourceAttrs.Get(resAttr.Key); ok {
+				switch typeAttr := resAttrVal.Type(); typeAttr {
+				case pcommon.ValueTypeInt:
+					countAttrs.PutInt(resAttr.Key, resAttrVal.Int())
+				case pcommon.ValueTypeDouble:
+					countAttrs.PutDouble(resAttr.Key, resAttrVal.Double())
+				default:
+					countAttrs.PutStr(resAttr.Key, resAttrVal.Str())
+				}
+			} else if resAttr.DefaultValue != "" {
+				switch v := resAttr.DefaultValue.(type) {
+				case string:
+					if v != "" {
+						countAttrs.PutStr(resAttr.Key, v)
+					}
+				case int:
+					if v != 0 {
+						countAttrs.PutInt(resAttr.Key, int64(v))
+					}
+				case float64:
+					if v != 0 {
+						countAttrs.PutDouble(resAttr.Key, float64(v))
 					}
 				}
 			}
