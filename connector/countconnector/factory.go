@@ -156,7 +156,8 @@ func createLogsToMetrics(
 }
 
 type metricDef[K any] struct {
-	condition expr.BoolExpr[K]
-	desc      string
-	attrs     []AttributeConfig
+	condition     expr.BoolExpr[K]
+	desc          string
+	attrs         []AttributeConfig
+	resourceAttrs []AttributeConfig
 }
