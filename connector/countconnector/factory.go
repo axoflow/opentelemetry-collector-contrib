@@ -155,7 +155,8 @@ func createLogsToMetrics(
 }
 
 type metricDef[K any] struct {
-	condition *ottl.ConditionSequence[K]
-	desc      string
-	attrs     []AttributeConfig
+	condition     *ottl.ConditionSequence[K]
+	desc          string
+	attrs         []AttributeConfig
+	resourceAttrs []AttributeConfig
 }
