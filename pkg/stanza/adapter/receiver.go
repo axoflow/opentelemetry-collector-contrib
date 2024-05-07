@@ -11,6 +11,7 @@ import (
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/extension/experimental/storage"
+	"go.opentelemetry.io/collector/pdata/plog"
 	rcvr "go.opentelemetry.io/collector/receiver"
 	"go.opentelemetry.io/collector/receiver/receiverhelper"
 	"go.uber.org/multierr"
@@ -33,6 +34,7 @@ type receiver struct {
 
 	storageID     *component.ID
 	storageClient storage.Client
+	sizer         plog.Sizer
 }
 
 // Ensure this receiver adheres to required interface
@@ -122,7 +124,7 @@ func (r *receiver) consumerLoop(ctx context.Context) {
 			}
 			obsrecvCtx := r.obsrecv.StartLogsOp(ctx)
 			logRecordCount := pLogs.LogRecordCount()
-			logRecordsSize := pLogs.LogRecordBytes()
+			logRecordsSize := r.sizer.LogsSize(pLogs)
 			cErr := r.consumer.ConsumeLogs(ctx, pLogs)
 			if cErr != nil {
 				r.logger.Error("ConsumeLogs() failed", zap.Error(cErr))

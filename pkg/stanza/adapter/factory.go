@@ -8,6 +8,7 @@ import (
 
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer"
+	"go.opentelemetry.io/collector/pdata/plog"
 	rcvr "go.opentelemetry.io/collector/receiver"
 	"go.opentelemetry.io/collector/receiver/receiverhelper"
 
@@ -82,6 +83,7 @@ func createLogsReceiver(logReceiverType LogReceiverType) rcvr.CreateLogsFunc {
 			converter: converter,
 			obsrecv:   obsrecv,
 			storageID: baseCfg.StorageID,
+			sizer:     &plog.ProtoMarshaler{},
 		}, nil
 	}
 }
