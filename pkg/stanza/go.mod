@@ -98,3 +98,7 @@ replace github.com/open-telemetry/opentelemetry-collector-contrib/pkg/pdatautil 
 replace github.com/open-telemetry/opentelemetry-collector-contrib/pkg/pdatatest => ../pdatatest
 
 replace github.com/open-telemetry/opentelemetry-collector-contrib/pkg/golden => ../golden
+
+replace go.opentelemetry.io/collector/pdata => github.com/axoflow/opentelemetry-collector/pdata v0.104.0-dev1
+
+replace go.opentelemetry.io/collector/receiver => github.com/axoflow/opentelemetry-collector/receiver v0.104.0-dev1
