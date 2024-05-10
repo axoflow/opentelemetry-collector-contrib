@@ -1,3 +1,7 @@
+github.com/axoflow/opentelemetry-collector/pdata v0.104.0-dev1 h1:Mc7o/oUGoCUdwOlKXcQEYlfS7JIoYfaWeJAyC3Sqn34=
+github.com/axoflow/opentelemetry-collector/pdata v0.104.0-dev1/go.mod h1:IHxHsp+Jq/xfjORQMDJjSH6jvedOSTOyu3nbxqhWSYE=
+github.com/axoflow/opentelemetry-collector/receiver v0.104.0-dev1 h1:KTuUFrm8Sps8HxBYkzHaPa1FCAacFMV6V7p5wnqWSMU=
+github.com/axoflow/opentelemetry-collector/receiver v0.104.0-dev1/go.mod h1:NM06euqrApTpzietV7cCPAwP8k4PyKlPBfSr3tqlMz4=
 github.com/beorn7/perks v1.0.1 h1:VlbKKnNfV8bJzeqoa4cOKqO6bYr3WgKZxO8Z16+hsOM=
 github.com/beorn7/perks v1.0.1/go.mod h1:G2ZrVWU2WbWT9wwq4/hrbKbnv/1ERSJQ0ibhJ6rlkpw=
 github.com/bmatcuk/doublestar/v4 v4.6.1 h1:FH9SifrbvJhnlQpztAx++wlkk70QBf0iBWDwNy7PA4I=
@@ -101,14 +105,10 @@ go.opentelemetry.io/collector/extension v0.104.0 h1:bftkgFMKya/QIwK+bOxEAPVs/TvT
 go.opentelemetry.io/collector/extension v0.104.0/go.mod h1:x7K0KyM1JGrtLbafEbRoVp0VpGBHpyx9hu87bsja6S4=
 go.opentelemetry.io/collector/featuregate v1.11.0 h1:Z7puIymKoQRm3oNM/NH8reWc2zRPz2PNaJvuokh0lQY=
 go.opentelemetry.io/collector/featuregate v1.11.0/go.mod h1:PsOINaGgTiFc+Tzu2K/X2jP+Ngmlp7YKGV1XrnBkH7U=
-go.opentelemetry.io/collector/pdata v1.11.0 h1:rzYyV1zfTQQz1DI9hCiaKyyaczqawN75XO9mdXmR/hE=
-go.opentelemetry.io/collector/pdata v1.11.0/go.mod h1:IHxHsp+Jq/xfjORQMDJjSH6jvedOSTOyu3nbxqhWSYE=
 go.opentelemetry.io/collector/pdata/pprofile v0.104.0 h1:MYOIHvPlKEJbWLiBKFQWGD0xd2u22xGVLt4jPbdxP4Y=
 go.opentelemetry.io/collector/pdata/pprofile v0.104.0/go.mod h1:7WpyHk2wJZRx70CGkBio8klrYTTXASbyIhf+rH4FKnA=
 go.opentelemetry.io/collector/pdata/testdata v0.104.0 h1:BKTZ7hIyAX5DMPecrXkVB2e86HwWtJyOlXn/5vSVXNw=
 go.opentelemetry.io/collector/pdata/testdata v0.104.0/go.mod h1:3SnYKu8gLfxURJMWS/cFEUFs+jEKS6jvfqKXnOZsdkQ=
-go.opentelemetry.io/collector/receiver v0.104.0 h1:URL1ExkYYd+qbndm7CdGvI2mxzsv/pNfmwJ+1QSQ9/o=
-go.opentelemetry.io/collector/receiver v0.104.0/go.mod h1:+enTCZQLf6dRRANWvykXEzrlRw2JDppXJtoYWd/Dd54=
 go.opentelemetry.io/collector/semconv v0.104.0 h1:dUvajnh+AYJLEW/XOPk0T0BlwltSdi3vrjO7nSOos3k=
 go.opentelemetry.io/collector/semconv v0.104.0/go.mod h1:yMVUCNoQPZVq/IPfrHrnntZTWsLf5YGZ7qwKulIl5hw=
 go.opentelemetry.io/otel v1.27.0 h1:9BZoF3yMK/O1AafMiQTVu0YDj5Ea4hPhxCs7sGva+cg=
