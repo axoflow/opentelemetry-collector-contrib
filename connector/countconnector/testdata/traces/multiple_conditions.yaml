@@ -1,12 +1,5 @@
 resourceMetrics:
-  - resource:
-      attributes:
-        - key: resource.required
-          value:
-            stringValue: foo
-        - key: resource.optional
-          value:
-            stringValue: bar
+  - resource: {}
     scopeMetrics:
       - metrics:
           - description: Span count if ...
@@ -14,14 +7,15 @@ resourceMetrics:
             sum:
               aggregationTemporality: 1
               dataPoints:
-                - asInt: "4"
-                  timeUnixNano: "1678392127923826000"
+                - asInt: "2"
+                  timeUnixNano: "1000000"
               isMonotonic: true
           - description: Span event count if ...
             name: spanevent.count.if
             sum:
               aggregationTemporality: 1
               dataPoints:
+<<<<<<< HEAD
                 - asInt: "16"
                   timeUnixNano: "1678392127923826000"
               isMonotonic: true
@@ -52,6 +46,10 @@ resourceMetrics:
               dataPoints:
                 - asInt: "16"
                   timeUnixNano: "1678392127923836000"
+=======
+                - asInt: "8"
+                  timeUnixNano: "1000000"
+>>>>>>> 6ba58ec472 (update testdata with new expected results)
               isMonotonic: true
         scope:
           name: github.com/open-telemetry/opentelemetry-collector-contrib/connector/countconnector
@@ -68,7 +66,7 @@ resourceMetrics:
               aggregationTemporality: 1
               dataPoints:
                 - asInt: "2"
-                  timeUnixNano: "1678392127923843000"
+                  timeUnixNano: "1000000"
               isMonotonic: true
           - description: Span event count if ...
             name: spanevent.count.if
@@ -76,11 +74,23 @@ resourceMetrics:
               aggregationTemporality: 1
               dataPoints:
                 - asInt: "8"
-                  timeUnixNano: "1678392127923843000"
+                  timeUnixNano: "1000000"
               isMonotonic: true
         scope:
+<<<<<<< HEAD
           name: github.com/open-telemetry/opentelemetry-collector-contrib/connector/countconnector
   - resource: {}
+=======
+          name: otelcol/countconnector
+  - resource:
+      attributes:
+        - key: resource.optional
+          value:
+            stringValue: bar
+        - key: resource.required
+          value:
+            stringValue: foo
+>>>>>>> 6ba58ec472 (update testdata with new expected results)
     scopeMetrics:
       - metrics:
           - description: Span count if ...
@@ -88,16 +98,44 @@ resourceMetrics:
             sum:
               aggregationTemporality: 1
               dataPoints:
-                - asInt: "2"
-                  timeUnixNano: "1678392127923849000"
+                - asInt: "4"
+                  timeUnixNano: "1000000"
               isMonotonic: true
           - description: Span event count if ...
             name: spanevent.count.if
             sum:
               aggregationTemporality: 1
               dataPoints:
-                - asInt: "8"
-                  timeUnixNano: "1678392127923849000"
+                - asInt: "16"
+                  timeUnixNano: "1000000"
+              isMonotonic: true
+        scope:
+          name: otelcol/countconnector
+  - resource:
+      attributes:
+        - key: resource.optional
+          value:
+            stringValue: notbar
+        - key: resource.required
+          value:
+            stringValue: foo
+    scopeMetrics:
+      - metrics:
+          - description: Span count if ...
+            name: span.count.if
+            sum:
+              aggregationTemporality: 1
+              dataPoints:
+                - asInt: "4"
+                  timeUnixNano: "1000000"
+              isMonotonic: true
+          - description: Span event count if ...
+            name: spanevent.count.if
+            sum:
+              aggregationTemporality: 1
+              dataPoints:
+                - asInt: "16"
+                  timeUnixNano: "1000000"
               isMonotonic: true
         scope:
           name: github.com/open-telemetry/opentelemetry-collector-contrib/connector/countconnector

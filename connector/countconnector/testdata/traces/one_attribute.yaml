@@ -1,12 +1,5 @@
 resourceMetrics:
-  - resource:
-      attributes:
-        - key: resource.required
-          value:
-            stringValue: foo
-        - key: resource.optional
-          value:
-            stringValue: bar
+  - resource: {}
     scopeMetrics:
       - metrics:
           - description: Span count by attribute
@@ -14,35 +7,40 @@ resourceMetrics:
             sum:
               aggregationTemporality: 1
               dataPoints:
+                - asInt: "1"
+                  timeUnixNano: "1000000"
                 - asInt: "2"
                   attributes:
                     - key: span.required
                       value:
                         stringValue: foo
-                  timeUnixNano: "1678392127925459000"
+                  timeUnixNano: "1000000"
                 - asInt: "1"
                   attributes:
                     - key: span.required
                       value:
                         stringValue: notfoo
-                  timeUnixNano: "1678392127925459000"
+                  timeUnixNano: "1000000"
               isMonotonic: true
           - description: Span event count by attribute
             name: spanevent.count.by_attr
             sum:
               aggregationTemporality: 1
               dataPoints:
+                - asInt: "4"
+                  timeUnixNano: "1000000"
                 - asInt: "8"
                   attributes:
                     - key: event.required
                       value:
                         stringValue: foo
-                  timeUnixNano: "1678392127925459000"
+                  timeUnixNano: "1000000"
                 - asInt: "4"
                   attributes:
                     - key: event.required
                       value:
                         stringValue: notfoo
+<<<<<<< HEAD
                   timeUnixNano: "1678392127925459000"
               isMonotonic: true
         scope:
@@ -92,6 +90,9 @@ resourceMetrics:
                       value:
                         stringValue: notfoo
                   timeUnixNano: "1678392127925468000"
+=======
+                  timeUnixNano: "1000000"
+>>>>>>> 6ba58ec472 (update testdata with new expected results)
               isMonotonic: true
         scope:
           name: github.com/open-telemetry/opentelemetry-collector-contrib/connector/countconnector
@@ -107,40 +108,56 @@ resourceMetrics:
             sum:
               aggregationTemporality: 1
               dataPoints:
+                - asInt: "1"
+                  timeUnixNano: "1000000"
                 - asInt: "2"
                   attributes:
                     - key: span.required
                       value:
                         stringValue: foo
-                  timeUnixNano: "1678392127925474000"
+                  timeUnixNano: "1000000"
                 - asInt: "1"
                   attributes:
                     - key: span.required
                       value:
                         stringValue: notfoo
-                  timeUnixNano: "1678392127925474000"
+                  timeUnixNano: "1000000"
               isMonotonic: true
           - description: Span event count by attribute
             name: spanevent.count.by_attr
             sum:
               aggregationTemporality: 1
               dataPoints:
+                - asInt: "4"
+                  timeUnixNano: "1000000"
                 - asInt: "8"
                   attributes:
                     - key: event.required
                       value:
                         stringValue: foo
-                  timeUnixNano: "1678392127925474000"
+                  timeUnixNano: "1000000"
                 - asInt: "4"
                   attributes:
                     - key: event.required
                       value:
                         stringValue: notfoo
-                  timeUnixNano: "1678392127925474000"
+                  timeUnixNano: "1000000"
               isMonotonic: true
         scope:
+<<<<<<< HEAD
           name: github.com/open-telemetry/opentelemetry-collector-contrib/connector/countconnector
   - resource: {}
+=======
+          name: otelcol/countconnector
+  - resource:
+      attributes:
+        - key: resource.optional
+          value:
+            stringValue: bar
+        - key: resource.required
+          value:
+            stringValue: foo
+>>>>>>> 6ba58ec472 (update testdata with new expected results)
     scopeMetrics:
       - metrics:
           - description: Span count by attribute
@@ -148,36 +165,92 @@ resourceMetrics:
             sum:
               aggregationTemporality: 1
               dataPoints:
+                - asInt: "1"
+                  timeUnixNano: "1000000"
                 - asInt: "2"
                   attributes:
                     - key: span.required
                       value:
                         stringValue: foo
-                  timeUnixNano: "1678392127925497000"
+                  timeUnixNano: "1000000"
                 - asInt: "1"
                   attributes:
                     - key: span.required
                       value:
                         stringValue: notfoo
-                  timeUnixNano: "1678392127925497000"
+                  timeUnixNano: "1000000"
               isMonotonic: true
           - description: Span event count by attribute
             name: spanevent.count.by_attr
             sum:
               aggregationTemporality: 1
               dataPoints:
+                - asInt: "4"
+                  timeUnixNano: "1000000"
                 - asInt: "8"
                   attributes:
                     - key: event.required
                       value:
                         stringValue: foo
-                  timeUnixNano: "1678392127925497000"
+                  timeUnixNano: "1000000"
                 - asInt: "4"
                   attributes:
                     - key: event.required
                       value:
                         stringValue: notfoo
-                  timeUnixNano: "1678392127925497000"
+                  timeUnixNano: "1000000"
+              isMonotonic: true
+        scope:
+          name: otelcol/countconnector
+  - resource:
+      attributes:
+        - key: resource.optional
+          value:
+            stringValue: notbar
+        - key: resource.required
+          value:
+            stringValue: foo
+    scopeMetrics:
+      - metrics:
+          - description: Span count by attribute
+            name: span.count.by_attr
+            sum:
+              aggregationTemporality: 1
+              dataPoints:
+                - asInt: "1"
+                  timeUnixNano: "1000000"
+                - asInt: "2"
+                  attributes:
+                    - key: span.required
+                      value:
+                        stringValue: foo
+                  timeUnixNano: "1000000"
+                - asInt: "1"
+                  attributes:
+                    - key: span.required
+                      value:
+                        stringValue: notfoo
+                  timeUnixNano: "1000000"
+              isMonotonic: true
+          - description: Span event count by attribute
+            name: spanevent.count.by_attr
+            sum:
+              aggregationTemporality: 1
+              dataPoints:
+                - asInt: "4"
+                  timeUnixNano: "1000000"
+                - asInt: "8"
+                  attributes:
+                    - key: event.required
+                      value:
+                        stringValue: foo
+                  timeUnixNano: "1000000"
+                - asInt: "4"
+                  attributes:
+                    - key: event.required
+                      value:
+                        stringValue: notfoo
+                  timeUnixNano: "1000000"
               isMonotonic: true
         scope:
           name: github.com/open-telemetry/opentelemetry-collector-contrib/connector/countconnector
