@@ -2,12 +2,12 @@ resourceMetrics:
   - resource: {}
     scopeMetrics:
       - metrics:
-          - description: All logs count
-            name: count.all
+          - description: Data point count by int attribute
+            name: datapoint.count.by_attr
             sum:
               aggregationTemporality: 1
               dataPoints:
-                - asInt: "4"
+                - asInt: "24"
                   timeUnixNano: "1000000"
               isMonotonic: true
         scope:
@@ -19,12 +19,44 @@ resourceMetrics:
             stringValue: notfoo
     scopeMetrics:
       - metrics:
-          - description: All logs count
-            name: count.all
+          - description: Data point count by int attribute
+            name: datapoint.count.by_attr
             sum:
               aggregationTemporality: 1
               dataPoints:
-                - asInt: "4"
+                - asInt: "24"
+                  timeUnixNano: "1000000"
+              isMonotonic: true
+        scope:
+          name: otelcol/countconnector
+  - resource:
+      attributes:
+        - key: resource.int
+          value:
+            intValue: "1"
+        - key: resource.optional_int
+          value:
+            intValue: "2"
+    scopeMetrics:
+      - metrics:
+          - description: Data point count by int attribute
+            name: datapoint.count.by_attr
+            sum:
+              aggregationTemporality: 1
+              dataPoints:
+                - asInt: "6"
+                  timeUnixNano: "1000000"
+                - asInt: "11"
+                  attributes:
+                    - key: datapoint.int
+                      value:
+                        intValue: "1"
+                  timeUnixNano: "1000000"
+                - asInt: "7"
+                  attributes:
+                    - key: datapoint.int
+                      value:
+                        intValue: "10"
                   timeUnixNano: "1000000"
               isMonotonic: true
         scope:
@@ -39,20 +71,12 @@ resourceMetrics:
             stringValue: foo
     scopeMetrics:
       - metrics:
-          - description: All logs count
-            name: count.all
+          - description: Data point count by int attribute
+            name: datapoint.count.by_attr
             sum:
               aggregationTemporality: 1
               dataPoints:
-                - asInt: "4"
-                  timeUnixNano: "1000000"
-              isMonotonic: true
-          - description: Count if ...
-            name: count.if
-            sum:
-              aggregationTemporality: 1
-              dataPoints:
-                - asInt: "4"
+                - asInt: "24"
                   timeUnixNano: "1000000"
               isMonotonic: true
         scope:
@@ -67,20 +91,12 @@ resourceMetrics:
             stringValue: foo
     scopeMetrics:
       - metrics:
-          - description: All logs count
-            name: count.all
+          - description: Data point count by int attribute
+            name: datapoint.count.by_attr
             sum:
               aggregationTemporality: 1
               dataPoints:
-                - asInt: "4"
-                  timeUnixNano: "1000000"
-              isMonotonic: true
-          - description: Count if ...
-            name: count.if
-            sum:
-              aggregationTemporality: 1
-              dataPoints:
-                - asInt: "4"
+                - asInt: "24"
                   timeUnixNano: "1000000"
               isMonotonic: true
         scope:
