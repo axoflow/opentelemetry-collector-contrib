@@ -94,11 +94,6 @@ func (c *counter[K]) update(ctx context.Context, attrs pcommon.Map, resourceAttr
 			}
 		}
 
-		// Missing necessary attributes to be counted
-		if countAttrs.Len() != len(md.attrs) {
-			continue
-		}
-
 		// No conditions, so match all.
 		if md.condition == nil {
 			multiError = errors.Join(multiError, c.increment(name, countAttrs))
