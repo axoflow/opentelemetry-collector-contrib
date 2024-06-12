@@ -1,12 +1,5 @@
 resourceMetrics:
-  - resource:
-      attributes:
-        - key: resource.required
-          value:
-            stringValue: foo
-        - key: resource.optional
-          value:
-            stringValue: bar
+  - resource: {}
     scopeMetrics:
       - metrics:
           - description: Metric count if ...
@@ -14,14 +7,15 @@ resourceMetrics:
             sum:
               aggregationTemporality: 1
               dataPoints:
-                - asInt: "6"
-                  timeUnixNano: "1678391923819487000"
+                - asInt: "1"
+                  timeUnixNano: "1000000"
               isMonotonic: true
           - description: Data point count if ...
             name: datapoint.count.if
             sum:
               aggregationTemporality: 1
               dataPoints:
+<<<<<<< HEAD
                 - asInt: "24"
                   timeUnixNano: "1678391923819487000"
               isMonotonic: true
@@ -52,6 +46,10 @@ resourceMetrics:
               dataPoints:
                 - asInt: "24"
                   timeUnixNano: "1678391923819499000"
+=======
+                - asInt: "12"
+                  timeUnixNano: "1000000"
+>>>>>>> 6ba58ec472 (update testdata with new expected results)
               isMonotonic: true
         scope:
           name: github.com/open-telemetry/opentelemetry-collector-contrib/connector/countconnector
@@ -68,7 +66,7 @@ resourceMetrics:
               aggregationTemporality: 1
               dataPoints:
                 - asInt: "1"
-                  timeUnixNano: "1678391923819509000"
+                  timeUnixNano: "1000000"
               isMonotonic: true
           - description: Data point count if ...
             name: datapoint.count.if
@@ -76,6 +74,7 @@ resourceMetrics:
               aggregationTemporality: 1
               dataPoints:
                 - asInt: "12"
+<<<<<<< HEAD
                   timeUnixNano: "1678391923819510000"
               isMonotonic: true
         scope:
@@ -98,6 +97,9 @@ resourceMetrics:
               dataPoints:
                 - asInt: "12"
                   timeUnixNano: "1678391923819529000"
+=======
+                  timeUnixNano: "1000000"
+>>>>>>> 6ba58ec472 (update testdata with new expected results)
               isMonotonic: true
         scope:
           name: github.com/open-telemetry/opentelemetry-collector-contrib/connector/countconnector
@@ -105,10 +107,10 @@ resourceMetrics:
       attributes:
         - key: resource.int
           value:
-            intValue: 1
+            intValue: "1"
         - key: resource.optional_int
           value:
-            intValue: 2
+            intValue: "2"
     scopeMetrics:
       - metrics:
           - description: Metric count if ...
@@ -117,7 +119,63 @@ resourceMetrics:
               aggregationTemporality: 1
               dataPoints:
                 - asInt: "1"
-                  timeUnixNano: "1678391923819487000"
+                  timeUnixNano: "1000000"
+              isMonotonic: true
+        scope:
+          name: otelcol/countconnector
+  - resource:
+      attributes:
+        - key: resource.optional
+          value:
+            stringValue: bar
+        - key: resource.required
+          value:
+            stringValue: foo
+    scopeMetrics:
+      - metrics:
+          - description: Metric count if ...
+            name: metric.count.if
+            sum:
+              aggregationTemporality: 1
+              dataPoints:
+                - asInt: "6"
+                  timeUnixNano: "1000000"
+              isMonotonic: true
+          - description: Data point count if ...
+            name: datapoint.count.if
+            sum:
+              aggregationTemporality: 1
+              dataPoints:
+                - asInt: "24"
+                  timeUnixNano: "1000000"
+              isMonotonic: true
+        scope:
+          name: otelcol/countconnector
+  - resource:
+      attributes:
+        - key: resource.optional
+          value:
+            stringValue: notbar
+        - key: resource.required
+          value:
+            stringValue: foo
+    scopeMetrics:
+      - metrics:
+          - description: Metric count if ...
+            name: metric.count.if
+            sum:
+              aggregationTemporality: 1
+              dataPoints:
+                - asInt: "6"
+                  timeUnixNano: "1000000"
+              isMonotonic: true
+          - description: Data point count if ...
+            name: datapoint.count.if
+            sum:
+              aggregationTemporality: 1
+              dataPoints:
+                - asInt: "24"
+                  timeUnixNano: "1000000"
               isMonotonic: true
         scope:
           name: github.com/open-telemetry/opentelemetry-collector-contrib/connector/countconnector
