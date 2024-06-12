@@ -1,12 +1,12 @@
 resourceMetrics:
   - resource:
       attributes:
-        - key: resource.required
-          value:
-            stringValue: foo
         - key: resource.optional
           value:
             stringValue: bar
+        - key: resource.required
+          value:
+            stringValue: foo
     scopeMetrics:
       - metrics:
           - description: Span count if ...
@@ -14,47 +14,51 @@ resourceMetrics:
             sum:
               aggregationTemporality: 1
               dataPoints:
+                - asInt: "1"
+                  timeUnixNano: "1000000"
                 - asInt: "2"
                   attributes:
                     - key: span.required
                       value:
                         stringValue: foo
-                  timeUnixNano: "1678392127929005000"
+                  timeUnixNano: "1000000"
                 - asInt: "1"
                   attributes:
                     - key: span.required
                       value:
                         stringValue: notfoo
-                  timeUnixNano: "1678392127929005000"
+                  timeUnixNano: "1000000"
               isMonotonic: true
           - description: Span event count by attribute if ...
             name: spanevent.count.if.by_attr
             sum:
               aggregationTemporality: 1
               dataPoints:
+                - asInt: "4"
+                  timeUnixNano: "1000000"
                 - asInt: "8"
                   attributes:
                     - key: event.required
                       value:
                         stringValue: foo
-                  timeUnixNano: "1678392127929006000"
+                  timeUnixNano: "1000000"
                 - asInt: "4"
                   attributes:
                     - key: event.required
                       value:
                         stringValue: notfoo
-                  timeUnixNano: "1678392127929006000"
+                  timeUnixNano: "1000000"
               isMonotonic: true
         scope:
           name: github.com/open-telemetry/opentelemetry-collector-contrib/connector/countconnector
   - resource:
       attributes:
-        - key: resource.required
-          value:
-            stringValue: foo
         - key: resource.optional
           value:
             stringValue: notbar
+        - key: resource.required
+          value:
+            stringValue: foo
     scopeMetrics:
       - metrics:
           - description: Span count if ...
@@ -62,36 +66,40 @@ resourceMetrics:
             sum:
               aggregationTemporality: 1
               dataPoints:
+                - asInt: "1"
+                  timeUnixNano: "1000000"
                 - asInt: "2"
                   attributes:
                     - key: span.required
                       value:
                         stringValue: foo
-                  timeUnixNano: "1678392127929018000"
+                  timeUnixNano: "1000000"
                 - asInt: "1"
                   attributes:
                     - key: span.required
                       value:
                         stringValue: notfoo
-                  timeUnixNano: "1678392127929018000"
+                  timeUnixNano: "1000000"
               isMonotonic: true
           - description: Span event count by attribute if ...
             name: spanevent.count.if.by_attr
             sum:
               aggregationTemporality: 1
               dataPoints:
+                - asInt: "4"
+                  timeUnixNano: "1000000"
                 - asInt: "8"
                   attributes:
                     - key: event.required
                       value:
                         stringValue: foo
-                  timeUnixNano: "1678392127929018000"
+                  timeUnixNano: "1000000"
                 - asInt: "4"
                   attributes:
                     - key: event.required
                       value:
                         stringValue: notfoo
-                  timeUnixNano: "1678392127929018000"
+                  timeUnixNano: "1000000"
               isMonotonic: true
         scope:
           name: github.com/open-telemetry/opentelemetry-collector-contrib/connector/countconnector

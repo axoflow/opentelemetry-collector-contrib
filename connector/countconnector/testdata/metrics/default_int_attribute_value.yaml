@@ -1,52 +1,147 @@
 resourceMetrics:
-  - resource:
-      attributes:
-        - key: resource.int
-          value:
-            intValue: 1
-        - key: resource.optional_int
-          value:
-            intValue: 2
+  - resource: {}
     scopeMetrics:
       - metrics:
           - description: Data point count by default int attribute
             name: datapoint.count.by_attr
             sum:
               aggregationTemporality: 1
-              dataPoints:                     
-                - asInt: "1"
+              dataPoints:
+                - asInt: "24"
+                  attributes:
+                    - key: datapoint.optional_int
+                      value:
+                        intValue: "10"
+                  timeUnixNano: "1000000"
+              isMonotonic: true
+        scope:
+          name: otelcol/countconnector
+  - resource:
+      attributes:
+        - key: resource.required
+          value:
+            stringValue: notfoo
+    scopeMetrics:
+      - metrics:
+          - description: Data point count by default int attribute
+            name: datapoint.count.by_attr
+            sum:
+              aggregationTemporality: 1
+              dataPoints:
+                - asInt: "24"
+                  attributes:
+                    - key: datapoint.optional_int
+                      value:
+                        intValue: "10"
+                  timeUnixNano: "1000000"
+              isMonotonic: true
+        scope:
+          name: otelcol/countconnector
+  - resource:
+      attributes:
+        - key: resource.int
+          value:
+            intValue: "1"
+        - key: resource.optional_int
+          value:
+            intValue: "2"
+    scopeMetrics:
+      - metrics:
+          - description: Data point count by default int attribute
+            name: datapoint.count.by_attr
+            sum:
+              aggregationTemporality: 1
+              dataPoints:
+                - asInt: "6"
+                  attributes:
+                    - key: datapoint.optional_int
+                      value:
+                        intValue: "10"
+                  timeUnixNano: "1000000"
+                - asInt: "6"
                   attributes:
                     - key: datapoint.int
                       value:
-                        intValue: 10
+                        intValue: "1"
                     - key: datapoint.optional_int
                       value:
-                        intValue: 4   
+                        intValue: "2"
+                  timeUnixNano: "1000000"
                 - asInt: "5"
                   attributes:
                     - key: datapoint.int
                       value:
-                        intValue: 1
+                        intValue: "1"
                     - key: datapoint.optional_int
                       value:
-                        intValue: 4  
+                        intValue: "4"
+                  timeUnixNano: "1000000"
                 - asInt: "6"
                   attributes:
                     - key: datapoint.int
                       value:
-                        intValue: 1
+                        intValue: "10"
                     - key: datapoint.optional_int
                       value:
-                        intValue: 2 
-                - asInt: "6"
+                        intValue: "10"
+                  timeUnixNano: "1000000"
+                - asInt: "1"
                   attributes:
                     - key: datapoint.int
                       value:
-                        intValue: 10
+                        intValue: "10"
                     - key: datapoint.optional_int
                       value:
-                        intValue: 10 
-                  timeUnixNano: "1678391923821179000"
+                        intValue: "4"
+                  timeUnixNano: "1000000"
+              isMonotonic: true
+        scope:
+          name: otelcol/countconnector
+  - resource:
+      attributes:
+        - key: resource.optional
+          value:
+            stringValue: bar
+        - key: resource.required
+          value:
+            stringValue: foo
+    scopeMetrics:
+      - metrics:
+          - description: Data point count by default int attribute
+            name: datapoint.count.by_attr
+            sum:
+              aggregationTemporality: 1
+              dataPoints:
+                - asInt: "24"
+                  attributes:
+                    - key: datapoint.optional_int
+                      value:
+                        intValue: "10"
+                  timeUnixNano: "1000000"
+              isMonotonic: true
+        scope:
+          name: otelcol/countconnector
+  - resource:
+      attributes:
+        - key: resource.optional
+          value:
+            stringValue: notbar
+        - key: resource.required
+          value:
+            stringValue: foo
+    scopeMetrics:
+      - metrics:
+          - description: Data point count by default int attribute
+            name: datapoint.count.by_attr
+            sum:
+              aggregationTemporality: 1
+              dataPoints:
+                - asInt: "24"
+                  attributes:
+                    - key: datapoint.optional_int
+                      value:
+                        intValue: "10"
+                  timeUnixNano: "1000000"
               isMonotonic: true
         scope:
           name: github.com/open-telemetry/opentelemetry-collector-contrib/connector/countconnector

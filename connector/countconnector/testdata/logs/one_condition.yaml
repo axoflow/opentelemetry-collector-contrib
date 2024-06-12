@@ -1,12 +1,12 @@
 resourceMetrics:
   - resource:
       attributes:
-        - key: resource.required
-          value:
-            stringValue: foo
         - key: resource.optional
           value:
             stringValue: bar
+        - key: resource.required
+          value:
+            stringValue: foo
     scopeMetrics:
       - metrics:
           - description: Count if ...
@@ -15,18 +15,18 @@ resourceMetrics:
               aggregationTemporality: 1
               dataPoints:
                 - asInt: "4"
-                  timeUnixNano: "1678390948395244000"
+                  timeUnixNano: "1000000"
               isMonotonic: true
         scope:
           name: github.com/open-telemetry/opentelemetry-collector-contrib/connector/countconnector
   - resource:
       attributes:
-        - key: resource.required
-          value:
-            stringValue: foo
         - key: resource.optional
           value:
             stringValue: notbar
+        - key: resource.required
+          value:
+            stringValue: foo
     scopeMetrics:
       - metrics:
           - description: Count if ...
@@ -35,7 +35,7 @@ resourceMetrics:
               aggregationTemporality: 1
               dataPoints:
                 - asInt: "4"
-                  timeUnixNano: "1678390948395279000"
+                  timeUnixNano: "1000000"
               isMonotonic: true
         scope:
           name: github.com/open-telemetry/opentelemetry-collector-contrib/connector/countconnector
