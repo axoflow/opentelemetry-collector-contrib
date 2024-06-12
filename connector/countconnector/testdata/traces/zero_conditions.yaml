@@ -1,12 +1,5 @@
 resourceMetrics:
-  - resource:
-      attributes:
-        - key: resource.required
-          value:
-            stringValue: foo
-        - key: resource.optional
-          value:
-            stringValue: bar
+  - resource: {}
     scopeMetrics:
       - metrics:
           - description: The number of spans observed.
@@ -15,7 +8,7 @@ resourceMetrics:
               aggregationTemporality: 1
               dataPoints:
                 - asInt: "4"
-                  timeUnixNano: "1678392127920605000"
+                  timeUnixNano: "1000000"
               isMonotonic: true
           - description: The number of span events observed.
             name: trace.span.event.count
@@ -23,35 +16,7 @@ resourceMetrics:
               aggregationTemporality: 1
               dataPoints:
                 - asInt: "16"
-                  timeUnixNano: "1678392127920605000"
-              isMonotonic: true
-        scope:
-          name: github.com/open-telemetry/opentelemetry-collector-contrib/connector/countconnector
-  - resource:
-      attributes:
-        - key: resource.required
-          value:
-            stringValue: foo
-        - key: resource.optional
-          value:
-            stringValue: notbar
-    scopeMetrics:
-      - metrics:
-          - description: The number of spans observed.
-            name: trace.span.count
-            sum:
-              aggregationTemporality: 1
-              dataPoints:
-                - asInt: "4"
-                  timeUnixNano: "1678392127920632000"
-              isMonotonic: true
-          - description: The number of span events observed.
-            name: trace.span.event.count
-            sum:
-              aggregationTemporality: 1
-              dataPoints:
-                - asInt: "16"
-                  timeUnixNano: "1678392127920632000"
+                  timeUnixNano: "1000000"
               isMonotonic: true
         scope:
           name: github.com/open-telemetry/opentelemetry-collector-contrib/connector/countconnector
@@ -68,7 +33,7 @@ resourceMetrics:
               aggregationTemporality: 1
               dataPoints:
                 - asInt: "4"
-                  timeUnixNano: "1678392127920635000"
+                  timeUnixNano: "1000000"
               isMonotonic: true
           - description: The number of span events observed.
             name: trace.span.event.count
@@ -76,11 +41,18 @@ resourceMetrics:
               aggregationTemporality: 1
               dataPoints:
                 - asInt: "16"
-                  timeUnixNano: "1678392127920635000"
+                  timeUnixNano: "1000000"
               isMonotonic: true
         scope:
           name: github.com/open-telemetry/opentelemetry-collector-contrib/connector/countconnector
-  - resource: {}
+  - resource:
+      attributes:
+        - key: resource.optional
+          value:
+            stringValue: bar
+        - key: resource.required
+          value:
+            stringValue: foo
     scopeMetrics:
       - metrics:
           - description: The number of spans observed.
@@ -89,7 +61,7 @@ resourceMetrics:
               aggregationTemporality: 1
               dataPoints:
                 - asInt: "4"
-                  timeUnixNano: "1678392127920638000"
+                  timeUnixNano: "1000000"
               isMonotonic: true
           - description: The number of span events observed.
             name: trace.span.event.count
@@ -97,7 +69,35 @@ resourceMetrics:
               aggregationTemporality: 1
               dataPoints:
                 - asInt: "16"
-                  timeUnixNano: "1678392127920638000"
+                  timeUnixNano: "1000000"
+              isMonotonic: true
+        scope:
+          name: github.com/open-telemetry/opentelemetry-collector-contrib/connector/countconnector
+  - resource:
+      attributes:
+        - key: resource.optional
+          value:
+            stringValue: notbar
+        - key: resource.required
+          value:
+            stringValue: foo
+    scopeMetrics:
+      - metrics:
+          - description: The number of spans observed.
+            name: trace.span.count
+            sum:
+              aggregationTemporality: 1
+              dataPoints:
+                - asInt: "4"
+                  timeUnixNano: "1000000"
+              isMonotonic: true
+          - description: The number of span events observed.
+            name: trace.span.event.count
+            sum:
+              aggregationTemporality: 1
+              dataPoints:
+                - asInt: "16"
+                  timeUnixNano: "1000000"
               isMonotonic: true
         scope:
           name: github.com/open-telemetry/opentelemetry-collector-contrib/connector/countconnector
