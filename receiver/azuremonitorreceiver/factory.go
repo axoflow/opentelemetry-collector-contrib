@@ -36,14 +36,15 @@ func createDefaultConfig() component.Config {
 	cfg.CollectionInterval = defaultCollectionInterval
 
 	return &Config{
-		ControllerConfig:              cfg,
-		MetricsBuilderConfig:          metadata.DefaultMetricsBuilderConfig(),
-		CacheResources:                24 * 60 * 60,
-		CacheResourcesDefinitions:     24 * 60 * 60,
-		MaximumNumberOfMetricsInACall: 20,
-		Services:                      monitorServices,
-		Authentication:                servicePrincipal,
-		Cloud:                         defaultCloud,
+		ControllerConfig:                  cfg,
+		MetricsBuilderConfig:              metadata.DefaultMetricsBuilderConfig(),
+		CacheResources:                    24 * 60 * 60,
+		CacheResourcesDefinitions:         24 * 60 * 60,
+		MaximumNumberOfMetricsInACall:     20,
+		MaximumNumberOfRecordsPerResource: 10,
+		Services:                          monitorServices,
+		Authentication:                    servicePrincipal,
+		Cloud:                             defaultCloud,
 	}
 }
 
@@ -54,7 +55,7 @@ func createMetricsReceiver(_ context.Context, params receiver.Settings, rConf co
 	}
 
 	azureScraper := newScraper(cfg, params)
-	scraper, err := scraperhelper.NewScraper(metadata.Type.String(), azureScraper.scrape, scraperhelper.WithStart(azureScraper.start))
+	scraper, err := scraperhelper.NewScraper(metadata.Type, azureScraper.scrape, scraperhelper.WithStart(azureScraper.start))
 	if err != nil {
 		return nil, err
 	}

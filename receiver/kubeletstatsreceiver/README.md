@@ -218,9 +218,10 @@ receivers:
       - pod
 ```
 
-### Collect k8s.container.cpu.node.utilization, `k8s.pod.cpu.node.utilization` as ratio of total node's capacity
+### Collect `k8s.{container,pod}.{cpu,memory}.node.utilization` as ratio of total node's capacity
 
-In order to calculate the `k8s.container.cpu.node.utilization` or `k8s.pod.cpu.node.utilization` metrics, the
+In order to calculate the `k8s.container.cpu.node.utilization`, `k8s.pod.cpu.node.utilization`,
+`k8s.container.memory.node.utilization` and `k8s.pod.memory.node.utilization` metrics, the
 information of the node's capacity must be retrieved from the k8s API. In this, the `k8s_api_config` needs to be set.
 In addition, the node name must be identified properly. The `K8S_NODE_NAME` env var can be set using the
 downward API inside the collector pod spec as follows:
@@ -247,6 +248,10 @@ receivers:
         k8s.container.cpu.node.utilization:
           enabled: true
         k8s.pod.cpu.node.utilization:
+          enabled: true
+        k8s.container.memory.node.utilization:
+          enabled: true
+        k8s.pod.memory.node.utilization:
           enabled: true
 ```
 
@@ -280,3 +285,23 @@ rules:
     resources: ["nodes/proxy"]
     verbs: ["get"]
 ```
+
+### Warning about metrics' deprecation
+
+The following metrics will be renamed in a future version:
+- `k8s.node.cpu.utilization` (renamed to `k8s.node.cpu.usage`)
+- `k8s.pod.cpu.utilization` (renamed to `k8s.pod.cpu.usage`)
+- `container.cpu.utilization` (renamed to `container.cpu.usage`)
+
+The above metrics show usage counted in CPUs and it's not a percentage of used resources.
+These metrics were previously incorrectly named using the utilization term.
+
+#### `receiver.kubeletstats.enableCPUUsageMetrics` feature gate
+
+- alpha: when enabled it makes the `.cpu.usage` metrics enabled by default, disabling the `.cpu.utilization` metrics
+- beta: `.cpu.usage` metrics are enabled by default and any configuration enabling the deprecated `.cpu.utilization` metrics will be failing. Explicitly disabling the feature gate provides the old (deprecated) behavior.
+- stable: `.cpu.usage` metrics are enabled by default and the deprecated metrics are completely removed.
+- removed three releases after stable.
+
+More information about the deprecation plan and
+the background reasoning can be found at https://github.com/open-telemetry/opentelemetry-collector-contrib/issues/27885.
