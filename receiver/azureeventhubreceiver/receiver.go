@@ -106,7 +106,7 @@ func (receiver *eventhubReceiver) consumeLogs(ctx context.Context, event *eventh
 
 	receiver.logger.Debug("Log Records", zap.Any("logs", logs))
 	err = receiver.nextLogsConsumer.ConsumeLogs(logsContext, logs)
-	receiver.obsrecv.EndLogsOp(logsContext, metadata.Type.String(), 1, err)
+	receiver.obsrecv.EndLogsOp(logsContext, metadata.Type.String(), 1, 0, err)
 
 	return err
 }
@@ -131,7 +131,7 @@ func (receiver *eventhubReceiver) consumeMetrics(ctx context.Context, event *eve
 	receiver.logger.Debug("Metric Records", zap.Any("metrics", metrics))
 	err = receiver.nextMetricsConsumer.ConsumeMetrics(metricsContext, metrics)
 
-	receiver.obsrecv.EndMetricsOp(metricsContext, metadata.Type.String(), 1, err)
+	receiver.obsrecv.EndMetricsOp(metricsContext, metadata.Type.String(), 1, 0, err)
 
 	return err
 }
@@ -156,7 +156,7 @@ func (receiver *eventhubReceiver) consumeTraces(ctx context.Context, event *even
 	receiver.logger.Debug("traces Records", zap.Any("traces", traces))
 	err = receiver.nextTracesConsumer.ConsumeTraces(tracesContext, traces)
 
-	receiver.obsrecv.EndTracesOp(tracesContext, metadata.Type.String(), 1, err)
+	receiver.obsrecv.EndTracesOp(tracesContext, metadata.Type.String(), 1, 0, err)
 
 	return err
 }
