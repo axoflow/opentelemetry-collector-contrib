@@ -98,7 +98,3 @@ replace github.com/open-telemetry/opentelemetry-collector-contrib/pkg/pdatautil 
 replace github.com/open-telemetry/opentelemetry-collector-contrib/pkg/pdatatest => ../pdatatest
 
 replace github.com/open-telemetry/opentelemetry-collector-contrib/pkg/golden => ../golden
-
-replace go.opentelemetry.io/collector/pdata => /Users/csatib/github/work/opentelemetry-collector/pdata
-
-replace go.opentelemetry.io/collector/receiver => /Users/csatib/github/work/opentelemetry-collector/receiver

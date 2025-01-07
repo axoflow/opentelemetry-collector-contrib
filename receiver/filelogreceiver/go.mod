@@ -94,5 +94,3 @@ replace github.com/open-telemetry/opentelemetry-collector-contrib/pkg/golden => 
 replace github.com/open-telemetry/opentelemetry-collector-contrib/internal/common => ../../internal/common
 
 replace github.com/open-telemetry/opentelemetry-collector-contrib/pkg/stanza => ../../pkg/stanza
-
-replace go.opentelemetry.io/collector/receiver => github.com/axoflow/opentelemetry-collector/receiver v0.104.0-dev1
