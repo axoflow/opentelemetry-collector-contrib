@@ -22,7 +22,7 @@ type Subscription struct {
 // Open will open the subscription handle.
 // It returns an error if the subscription handle is already open or if any step in the process fails.
 // If the remote server is not reachable, it returns an error indicating the failure.
-func (s *Subscription) Open(startAt string, sessionHandle uintptr, channel string, bookmark Bookmark) error {
+func (s *Subscription) Open(startAt string, sessionHandle uintptr, channel string, query *string, bookmark Bookmark) error {
 	if s.handle != 0 {
 		return fmt.Errorf("subscription handle is already open")
 	}
@@ -35,13 +35,24 @@ func (s *Subscription) Open(startAt string, sessionHandle uintptr, channel strin
 		_ = windows.CloseHandle(signalEvent)
 	}()
 
+	if channel != "" && query != nil {
+		return fmt.Errorf("can not supply both query and channel")
+	}
+
 	channelPtr, err := syscall.UTF16PtrFromString(channel)
 	if err != nil {
 		return fmt.Errorf("failed to convert channel to utf16: %w", err)
 	}
 
+	var queryPtr *uint16
+	if query != nil {
+		if queryPtr, err = syscall.UTF16PtrFromString(*query); err != nil {
+			return fmt.Errorf("failed to convert channel to utf16: %w", err)
+		}
+	}
+
 	flags := s.createFlags(startAt, bookmark)
-	subscriptionHandle, err := evtSubscribeFunc(sessionHandle, signalEvent, channelPtr, nil, bookmark.handle, 0, 0, flags)
+	subscriptionHandle, err := evtSubscribeFunc(sessionHandle, signalEvent, channelPtr, queryPtr, bookmark.handle, 0, 0, flags)
 	if err != nil {
 		return fmt.Errorf("failed to subscribe to %s channel: %w", channel, err)
 	}
