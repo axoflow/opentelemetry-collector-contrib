@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"time"
 
+	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/confmap"
 )
 
@@ -20,10 +21,11 @@ var (
 
 // Config is the overall config structure for the awscloudwatchreceiver
 type Config struct {
-	Region       string      `mapstructure:"region"`
-	Profile      string      `mapstructure:"profile"`
-	IMDSEndpoint string      `mapstructure:"imds_endpoint"`
-	Logs         *LogsConfig `mapstructure:"logs"`
+	Region       string        `mapstructure:"region"`
+	Profile      string        `mapstructure:"profile"`
+	IMDSEndpoint string        `mapstructure:"imds_endpoint"`
+	Logs         *LogsConfig   `mapstructure:"logs"`
+	StorageID    *component.ID `mapstructure:"storage"`
 }
 
 // LogsConfig is the configuration for the logs portion of this receiver
