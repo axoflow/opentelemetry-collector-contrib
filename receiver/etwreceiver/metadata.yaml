@@ -1,0 +1,11 @@
+type: etw
+
+status:
+  class: receiver
+  stability:
+    development: [logs]
+  distributions: [contrib]
+  codeowners:
+    active: [overorion]
+  unsupported_platforms: [darwin, linux]
+
