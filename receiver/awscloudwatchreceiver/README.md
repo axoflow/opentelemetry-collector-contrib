@@ -29,6 +29,7 @@ This receiver uses the [AWS SDK](https://docs.aws.amazon.com/sdk-for-go/v1/devel
 | `profile`       | *optional* | string | The AWS profile used to authenticate, if none is specified the default is chosen from the list of profiles                                                                                                                                                                        |
 | `imds_endpoint` | *optional* | string | A way of specifying a custom URL to be used by the EC2 IMDS client to validate the session. If unset, and the environment variable `AWS_EC2_METADATA_SERVICE_ENDPOINT` has a value the client will use the value of the environment variable as the endpoint for operation calls. |
 | `logs`          | *optional* | `Logs` | Configuration for Logs ingestion of this receiver                                                                                                                                                                                                                                 |
+| `storage` | *optional* | string | The ID of a storage extension to be used for state persistence. |
 
 ### Logs Parameters
 
@@ -114,4 +115,3 @@ This receiver has a number of sample configs for reference.
    - Specifies the names of the log groups to collect
    - Does not attempt autodiscovery
    - Only collects from log streams matching a prefix
-
