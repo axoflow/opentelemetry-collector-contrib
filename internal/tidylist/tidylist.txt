@@ -238,6 +238,7 @@ receiver/collectdreceiver
 receiver/couchdbreceiver
 receiver/elasticsearchreceiver
 receiver/envoyalsreceiver
+receiver/etwreceiver
 receiver/expvarreceiver
 receiver/filestatsreceiver
 receiver/flinkmetricsreceiver
