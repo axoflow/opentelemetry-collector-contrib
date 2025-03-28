@@ -17,6 +17,33 @@
 |-------------|---------- |--------------------------------------------|
 | `providers` | required  | List of providers that to be subscribed to |
 
+
+## Example configuration
+
+```yaml
+receivers:
+  etw/guid_or_name:
+    providers: ["{9e814aad-3204-11d2-9a82-006008a86939}", "Microsoft-Windows-Kernel-File"]
+  etw/with_filtering:
+    providers: ["Microsoft-Windows-DNSServer:2"]
+```
+
+### Level filtering
+
+To filter for specific log levels for a given provider append the log level value to the provider name separated by a colon (as done in `etw/with_filtering`).
+Higher numbers imply that you get lower levels as well. For example, if you specify `Warning` with the value `3`, you receive all warning (`3`), error (`2`), and critical (`1`) events.
+
+
+|Log Level     |Value|
+|--------------|-----|
+|Critical      |    1|
+|Error         |    2|
+|Warning       |    3|
+|Informational |    4|
+|Verbose       |    5|
+
+[See the official documentation for details](https://learn.microsoft.com/en-us/windows/win32/wes/eventmanifestschema-leveltype-complextype)
+
 ## Troubleshooting
 
 Component can not start, fails with "Insufficient system resources exist to complete the requested service."
