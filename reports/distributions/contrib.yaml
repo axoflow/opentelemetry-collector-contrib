@@ -159,6 +159,7 @@ components:
         - docker_stats
         - elasticsearch
         - envoyals
+        - etw
         - expvar
         - faro
         - file_log
