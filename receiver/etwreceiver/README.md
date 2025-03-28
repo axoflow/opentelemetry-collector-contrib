@@ -16,3 +16,26 @@
 | Field       | Default   | Description                                |
 |-------------|---------- |--------------------------------------------|
 | `providers` | required  | List of providers that to be subscribed to |
+
+## Troubleshooting
+
+Component can not start, fails with "Insufficient system resources exist to complete the requested service."
+
+In case of non-graceful shutdowns there could be orphaned trace sessions that have to be manually stopped.
+Based on the types of the configured providers it's possible that even **one orphaned** session blocks the start up sequence of the ETW receiver.
+[See the official documentation for details](https://learn.microsoft.com/en-us/windows/win32/etw/about-event-tracing#types-of-providers)
+
+Use the following command to list currently active tracing sessions:
+
+```powershell
+logman.exe query -ets
+```
+
+The name of the orphaned session follows this pattern: `ETWReceiverSession-etw/<name_of_the_receiver>`
+Run the following command to stop and remove the session:
+
+```powershell
+logman.exe stop -ets ETWReceiverSession-etw/<name_of_the_receiver>
+logman.exe delete -ets ETWReceiverSession-etw/<name_of_the_receiver>
+```
+
