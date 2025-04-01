@@ -8,11 +8,12 @@ package etwreceiver // import "github.com/open-telemetry/opentelemetry-collector
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/0xrawsec/golang-etw/etw"
+	"github.com/bi-zone/etw"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/pdata/pcommon"
@@ -20,6 +21,7 @@ import (
 	"go.opentelemetry.io/collector/receiver"
 	"go.opentelemetry.io/collector/receiver/receiverhelper"
 	"go.uber.org/zap"
+	"golang.org/x/sys/windows"
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/etwreceiver/internal/metadata"
 )
@@ -41,9 +43,9 @@ func createLogsReceiver(ctx context.Context, settings receiver.Settings, cc comp
 }
 
 type etwReceiver struct {
-	providers       []etw.Provider
-	session         *etw.RealTimeSession
-	etwReader       *etw.Consumer
+	guid            windows.GUID
+	session         *etw.Session
+	sessionStarted  bool
 	cancel          context.CancelFunc
 	logger          *zap.Logger
 	obsrecv         *receiverhelper.ObsReport
@@ -62,37 +64,40 @@ func newEtwReceiver(_ context.Context, cfg *WindowsEtwConfig, consumer consumer.
 		return nil, err
 	}
 
-	providers := make([]etw.Provider, len(cfg.Providers))
-	for idx, prov := range cfg.Providers {
-		provider, err := etw.ParseProvider(prov)
-		if err != nil {
-			return nil, err
-		}
-		providers[idx] = provider
+	guid, err := windows.GUIDFromString(cfg.Provider)
+	if err != nil {
+		return nil, err
 	}
 
 	sessionName := strings.Join([]string{sessionNamePrefix, settings.ID.String()}, "-")
+	var exists etw.ExistsError
+	session, err := etw.NewSession(guid, etw.WithName(sessionName))
+	if errors.As(err, &exists) {
+		settings.Logger.Info("ETW session already exists, deleting previous session", zap.String("session_name", exists.SessionName))
+		err = etw.KillSession(exists.SessionName)
+		session, err = etw.NewSession(guid, etw.WithName(sessionName))
+	}
+	if err != nil {
+		settings.Logger.Fatal("Could not create ETW session", zap.Error(err))
+		return nil, err
+	}
 
 	return &etwReceiver{
 		obsrecv:         obsrecv,
-		providers:       providers,
+		guid:            guid,
 		logsConsumer:    consumer,
 		logger:          settings.Logger,
 		logsUnmarshaler: plog.JSONUnmarshaler{},
-		session:         etw.NewRealTimeSession(sessionName),
+		session:         session,
 	}, nil
 }
 
 func (r *etwReceiver) Shutdown(_ context.Context) error {
 	r.logger.Info("Shutting down ETW receiver")
-	if r.etwReader != nil {
-		if err := r.etwReader.Stop(); err != nil {
-			return err
-		}
-	}
 
-	if r.session.IsStarted() {
-		if err := r.session.Stop(); err != nil {
+	if r.sessionStarted {
+		r.sessionStarted = false
+		if err := r.session.Close(); err != nil {
 			return err
 		}
 	}
@@ -106,32 +111,20 @@ func (r *etwReceiver) Shutdown(_ context.Context) error {
 }
 
 func (r *etwReceiver) Start(ctx context.Context, _ component.Host) error {
-	r.logger.Debug("Starting ETW receiver", zap.Any("providers", r.providers))
+	r.logger.Debug("Starting ETW receiver")
+	r.sessionStarted = true
 	var cancelCtx context.Context
 	cancelCtx, r.cancel = context.WithCancel(ctx)
 
-	for _, prov := range r.providers {
-		r.logger.Info("Enabling provider", zap.Any("provider", prov))
-		if err := r.session.EnableProvider(prov); err != nil {
-			r.logger.Error("Failed to enable provider", zap.Error(err))
-			return err
-		}
-	}
-
-	r.logger.Debug("Creating etwReader")
-	r.etwReader = etw.NewRealTimeConsumer(cancelCtx)
-	r.logger.Debug("Enabling sessions")
-	r.etwReader.FromSessions(r.session)
-
 	var err error
 	r.wg.Add(1)
-	if err = r.etwReader.Start(); err != nil {
-		r.logger.Error("Failed to start ETW receiver's etwReader", zap.Error(err))
-	}
 	go func() {
 		defer r.wg.Done()
 		r.logger.Info("Reading ETW traces")
-		for event := range r.etwReader.Events {
+		if err := r.session.Process(func(event *etw.Event) {
+			props, _ := event.EventProperties()
+			r.logger.Info("Received ETW event", zap.Any("event", event), zap.Any("props", props))
+
 			logs, conversionError := r.convertEventToPlogLogs(event)
 			if conversionError != nil {
 				r.logger.Error("Failed to convert ETW event to OTLP log", zap.Error(conversionError))
@@ -145,6 +138,8 @@ func (r *etwReceiver) Start(ctx context.Context, _ component.Host) error {
 			if err != nil {
 				r.logger.Error("Failed to consume logs", zap.Error(err))
 			}
+		}); err != nil {
+			r.logger.Error("Failed to read from ETW session", zap.Error(err))
 		}
 	}()
 
@@ -169,7 +164,24 @@ func etwLevelToSeverityNumber(levelValue uint8) plog.SeverityNumber {
 }
 
 func (r *etwReceiver) convertEventToPlogLogs(event *etw.Event) (*plog.Logs, error) {
-	buff, err := json.Marshal(event)
+	eventProperties, err := event.EventProperties()
+	if err != nil {
+		// r.logger.Error("Failed to get ETW event props", zap.Error(err))
+		eventProperties = map[string]any{}
+	}
+
+	providerID := event.Header.ProviderID.String()
+	activityID := event.Header.ActivityID.String()
+
+	unifiedMap := map[string]any{
+		"EventData":         eventProperties,
+		"ExtendedEventInfo": event.ExtendedInfo(),
+		"System":            event,
+		"ProviderID":        providerID,
+		"ActivityID":        activityID,
+	}
+
+	buff, err := json.Marshal(unifiedMap)
 	if err != nil {
 		r.logger.Error("Failed to marshal ETW event", zap.Error(err))
 		return nil, err
@@ -190,14 +202,14 @@ func (r *etwReceiver) convertEventToPlogLogs(event *etw.Event) (*plog.Logs, erro
 
 	err = lr.Attributes().FromRaw(rawMap)
 	if err != nil {
+		r.logger.Error("Failed to populate from rawMap", zap.Error(err))
 		return nil, err
 	}
 
-	lr.SetTimestamp(pcommon.NewTimestampFromTime(event.System.TimeCreated.SystemTime))
+	lr.SetTimestamp(pcommon.NewTimestampFromTime(event.Header.TimeStamp))
 	lr.SetObservedTimestamp(pcommon.NewTimestampFromTime(time.Now()))
 
-	lr.SetSeverityNumber(etwLevelToSeverityNumber(event.System.Level.Value))
-	lr.SetSeverityText(event.System.Level.Name)
+	lr.SetSeverityNumber(etwLevelToSeverityNumber(event.Header.Level))
 
 	return &out, nil
 }
