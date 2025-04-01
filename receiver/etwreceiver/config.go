@@ -14,5 +14,5 @@ func createDefaultConfig() component.Config {
 
 // WindowsEtwConfig defines configuration for the etw receiver
 type WindowsEtwConfig struct {
-	Providers []string `mapstructure:"providers"`
+	Provider string `mapstructure:"provider"`
 }
