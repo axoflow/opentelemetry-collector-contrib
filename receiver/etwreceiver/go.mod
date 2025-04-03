@@ -53,3 +53,5 @@ require (
 	google.golang.org/protobuf v1.36.5 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
+
+replace github.com/bi-zone/etw => github.com/axoflow/etw v0.0.0-20250403143956-9aefb76c3989
