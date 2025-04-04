@@ -54,6 +54,19 @@ type etwReceiver struct {
 	wg              sync.WaitGroup
 }
 
+func (cfg *WindowsEtwConfig) extractProviderGUID() (*windows.GUID, error) {
+	if !strings.HasPrefix(cfg.Provider, "{") {
+		return etw.ProviderGUIDFromString(cfg.Provider)
+	}
+
+	guid, err := windows.GUIDFromString(cfg.Provider)
+	if err != nil {
+		return nil, err
+	}
+
+	return &guid, nil
+}
+
 func newEtwReceiver(_ context.Context, cfg *WindowsEtwConfig, consumer consumer.Logs, settings receiver.Settings) (*etwReceiver, error) {
 	obsrecv, err := receiverhelper.NewObsReport(receiverhelper.ObsReportSettings{
 		ReceiverID:             settings.ID,
@@ -64,10 +77,14 @@ func newEtwReceiver(_ context.Context, cfg *WindowsEtwConfig, consumer consumer.
 		return nil, err
 	}
 
-	guid, err := windows.GUIDFromString(cfg.Provider)
+	guidPtr, err := cfg.extractProviderGUID()
 	if err != nil {
+		settings.Logger.Fatal("Could not find provider", zap.Any("provider", cfg.Provider), zap.Error(err))
 		return nil, err
 	}
+	guid := *guidPtr
+
+	settings.Logger.Info("Using provider", zap.Any("provider", guid))
 
 	sessionName := strings.Join([]string{sessionNamePrefix, settings.ID.String()}, "-")
 	var exists etw.ExistsError
