@@ -73,7 +73,7 @@ func newEtwReceiver(_ context.Context, cfg *WindowsEtwConfig, consumer consumer.
 	var exists etw.ExistsError
 	session, err := etw.NewSession(guid, etw.WithName(sessionName))
 	if errors.As(err, &exists) {
-		settings.Logger.Info("ETW session already exists, deleting previous session", zap.String("session_name", exists.SessionName))
+		settings.Logger.Info("ETW session already exists, deleting previous session, then creating new one", zap.String("session_name", exists.SessionName))
 		err = etw.KillSession(exists.SessionName)
 		session, err = etw.NewSession(guid, etw.WithName(sessionName))
 	}
