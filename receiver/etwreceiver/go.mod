@@ -54,4 +54,4 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
-replace github.com/bi-zone/etw => github.com/axoflow/etw v0.0.0-20250403143956-9aefb76c3989
+replace github.com/bi-zone/etw => github.com/axoflow/etw v0.0.0-20250407125135-65c06ad4eb7a
