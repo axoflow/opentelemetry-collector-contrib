@@ -183,7 +183,6 @@ func etwLevelToSeverityNumber(levelValue uint8) plog.SeverityNumber {
 func (r *etwReceiver) convertEventToPlogLogs(event *etw.Event) (*plog.Logs, error) {
 	eventProperties, err := event.EventProperties()
 	if err != nil {
-		// r.logger.Error("Failed to get ETW event props", zap.Error(err))
 		eventProperties = map[string]any{}
 	}
 
