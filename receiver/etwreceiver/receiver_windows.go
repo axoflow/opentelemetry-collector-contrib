@@ -86,9 +86,14 @@ func newEtwReceiver(_ context.Context, cfg *WindowsEtwConfig, consumer consumer.
 
 	settings.Logger.Info("Using provider", zap.Any("provider", guid))
 
+	traceLevel, err := TraceLevelFromString(cfg.Level)
+	if err != nil {
+		return nil, err
+	}
+
 	sessionName := strings.Join([]string{sessionNamePrefix, settings.ID.String()}, "-")
 	var exists etw.ExistsError
-	session, err := etw.NewSession(guid, etw.WithName(sessionName))
+	session, err := etw.NewSession(guid, etw.WithName(sessionName), etw.WithLevel(etw.TraceLevel(traceLevel)))
 	if errors.As(err, &exists) {
 		settings.Logger.Info("ETW session already exists, deleting previous session, then creating new one", zap.String("session_name", exists.SessionName))
 		err = etw.KillSession(exists.SessionName)
