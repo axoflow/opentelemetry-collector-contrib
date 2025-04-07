@@ -9,5 +9,10 @@ func (c *WindowsEtwConfig) Validate() error {
 	if _, err := c.extractProviderGUID(); err != nil {
 		return err
 	}
+	if c.Level != "" {
+		if _, err := TraceLevelFromString(c.Level); err != nil {
+			return err
+		}
+	}
 	return nil
 }
