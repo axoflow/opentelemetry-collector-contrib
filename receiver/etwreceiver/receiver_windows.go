@@ -145,7 +145,7 @@ func (r *etwReceiver) Start(ctx context.Context, _ component.Host) error {
 		r.logger.Info("Reading ETW traces")
 		if err := r.session.Process(func(event *etw.Event) {
 			props, _ := event.EventProperties()
-			r.logger.Info("Received ETW event", zap.Any("event", event), zap.Any("props", props))
+			r.logger.Debug("Received ETW event", zap.Any("event", event), zap.Any("props", props))
 
 			logs, conversionError := r.convertEventToPlogLogs(event)
 			if conversionError != nil {
