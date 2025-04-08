@@ -188,7 +188,7 @@ func etwLevelToSeverityNumber(levelValue uint8) plog.SeverityNumber {
 func (r *etwReceiver) convertEventToPlogLogs(event *etw.Event) (*plog.Logs, error) {
 	eventProperties, err := event.EventProperties()
 	if err != nil {
-		eventProperties = map[string]any{}
+		r.logger.Debug("Failed to extend ETW event", zap.Error(err))
 	}
 
 	providerID := event.Header.ProviderID.String()
