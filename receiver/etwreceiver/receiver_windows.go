@@ -191,15 +191,9 @@ func (r *etwReceiver) convertEventToPlogLogs(event *etw.Event) (*plog.Logs, erro
 		r.logger.Debug("Failed to extend ETW event", zap.Error(err))
 	}
 
-	providerID := event.Header.ProviderID.String()
-	activityID := event.Header.ActivityID.String()
-
 	unifiedMap := map[string]any{
-		"EventData":         eventProperties,
-		"ExtendedEventInfo": event.ExtendedInfo(),
-		"System":            event,
-		"ProviderID":        providerID,
-		"ActivityID":        activityID,
+		"EventData": eventProperties,
+		"System":    event,
 	}
 
 	buff, err := json.Marshal(unifiedMap)
