@@ -1,7 +1,7 @@
 github.com/Microsoft/go-winio v0.4.14 h1:+hMXMk01us9KgxGb7ftKQt2Xpf5hH/yky+TDA+qxleU=
 github.com/Microsoft/go-winio v0.4.14/go.mod h1:qXqCSQ3Xa7+6tgxaGTIe4Kpcdsi+P8jBhyzoq1bpyYA=
-github.com/axoflow/etw v0.0.0-20250403143956-9aefb76c3989 h1:LTbWVl2dAcgZQLHY1v9DpiSiEglHBCk2MUlsk1s3JVs=
-github.com/axoflow/etw v0.0.0-20250403143956-9aefb76c3989/go.mod h1:zKqsOt4mtyCJdf0+N6gOlEuQYz7glH2dVg7GiNpY67M=
+github.com/axoflow/etw v0.0.0-20250407125135-65c06ad4eb7a h1:lPhlOwqeX9R2oBxl70/pXtEy93KohsJt58Zi+A4i904=
+github.com/axoflow/etw v0.0.0-20250407125135-65c06ad4eb7a/go.mod h1:zKqsOt4mtyCJdf0+N6gOlEuQYz7glH2dVg7GiNpY67M=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
