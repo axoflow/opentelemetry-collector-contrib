@@ -86,9 +86,14 @@ func newEtwReceiver(_ context.Context, cfg *WindowsEtwConfig, consumer consumer.
 
 	settings.Logger.Info("Using provider", zap.Any("provider", guid))
 
+	traceLevel, err := TraceLevelFromString(cfg.Level)
+	if err != nil {
+		return nil, err
+	}
+
 	sessionName := strings.Join([]string{sessionNamePrefix, settings.ID.String()}, "-")
 	var exists etw.ExistsError
-	session, err := etw.NewSession(guid, etw.WithName(sessionName))
+	session, err := etw.NewSession(guid, etw.WithName(sessionName), etw.WithLevel(etw.TraceLevel(traceLevel)))
 	if errors.As(err, &exists) {
 		settings.Logger.Info("ETW session already exists, deleting previous session, then creating new one", zap.String("session_name", exists.SessionName))
 		err = etw.KillSession(exists.SessionName)
@@ -140,7 +145,7 @@ func (r *etwReceiver) Start(ctx context.Context, _ component.Host) error {
 		r.logger.Info("Reading ETW traces")
 		if err := r.session.Process(func(event *etw.Event) {
 			props, _ := event.EventProperties()
-			r.logger.Info("Received ETW event", zap.Any("event", event), zap.Any("props", props))
+			r.logger.Debug("Received ETW event", zap.Any("event", event), zap.Any("props", props))
 
 			logs, conversionError := r.convertEventToPlogLogs(event)
 			if conversionError != nil {
@@ -183,18 +188,12 @@ func etwLevelToSeverityNumber(levelValue uint8) plog.SeverityNumber {
 func (r *etwReceiver) convertEventToPlogLogs(event *etw.Event) (*plog.Logs, error) {
 	eventProperties, err := event.EventProperties()
 	if err != nil {
-		eventProperties = map[string]any{}
+		r.logger.Debug("Failed to extend ETW event", zap.Error(err))
 	}
 
-	providerID := event.Header.ProviderID.String()
-	activityID := event.Header.ActivityID.String()
-
 	unifiedMap := map[string]any{
-		"EventData":         eventProperties,
-		"ExtendedEventInfo": event.ExtendedInfo(),
-		"System":            event,
-		"ProviderID":        providerID,
-		"ActivityID":        activityID,
+		"EventData": eventProperties,
+		"System":    event,
 	}
 
 	buff, err := json.Marshal(unifiedMap)
