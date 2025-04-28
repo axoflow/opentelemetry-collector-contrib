@@ -43,15 +43,16 @@ func createLogsReceiver(ctx context.Context, settings receiver.Settings, cc comp
 }
 
 type etwReceiver struct {
-	guid            windows.GUID
-	session         *etw.Session
-	sessionStarted  bool
-	cancel          context.CancelFunc
-	logger          *zap.Logger
-	obsrecv         *receiverhelper.ObsReport
-	logsConsumer    consumer.Logs
-	logsUnmarshaler plog.JSONUnmarshaler
-	wg              sync.WaitGroup
+	guid                  windows.GUID
+	session               *etw.Session
+	sessionStarted        bool
+	cancel                context.CancelFunc
+	logger                *zap.Logger
+	obsrecv               *receiverhelper.ObsReport
+	logsConsumer          consumer.Logs
+	logsUnmarshaler       plog.JSONUnmarshaler
+	wg                    sync.WaitGroup
+	ignoreMissingProvider bool
 }
 
 func (cfg *WindowsEtwConfig) extractProviderGUID() (*windows.GUID, error) {
@@ -79,8 +80,17 @@ func newEtwReceiver(_ context.Context, cfg *WindowsEtwConfig, consumer consumer.
 
 	guidPtr, err := cfg.extractProviderGUID()
 	if err != nil {
-		settings.Logger.Fatal("Could not find provider", zap.Any("provider", cfg.Provider), zap.Error(err))
-		return nil, err
+		settings.Logger.Warn("Could not find provider", zap.Any("provider", cfg.Provider), zap.Error(err))
+		if !cfg.IgnoreMissingProvider {
+			return nil, err
+		}
+		return &etwReceiver{
+			obsrecv:               obsrecv,
+			session:               nil,
+			logsConsumer:          consumer,
+			logger:                settings.Logger,
+			ignoreMissingProvider: cfg.IgnoreMissingProvider,
+		}, nil
 	}
 	guid := *guidPtr
 
@@ -117,7 +127,7 @@ func newEtwReceiver(_ context.Context, cfg *WindowsEtwConfig, consumer consumer.
 func (r *etwReceiver) Shutdown(_ context.Context) error {
 	r.logger.Info("Shutting down ETW receiver")
 
-	if r.sessionStarted {
+	if r.sessionStarted && r.session != nil {
 		r.sessionStarted = false
 		if err := r.session.Close(); err != nil {
 			return err
@@ -137,6 +147,11 @@ func (r *etwReceiver) Start(ctx context.Context, _ component.Host) error {
 	r.sessionStarted = true
 	var cancelCtx context.Context
 	cancelCtx, r.cancel = context.WithCancel(ctx)
+
+	if r.session == nil && r.ignoreMissingProvider {
+		r.logger.Warn("Could not create session, but ignoreMissingProvider is set, so continuing")
+		return nil
+	}
 
 	var err error
 	r.wg.Add(1)

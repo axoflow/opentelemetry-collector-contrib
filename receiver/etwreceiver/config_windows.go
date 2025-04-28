@@ -7,7 +7,10 @@ package etwreceiver // import "github.com/open-telemetry/opentelemetry-collector
 
 func (c *WindowsEtwConfig) Validate() error {
 	if _, err := c.extractProviderGUID(); err != nil {
-		return err
+		if !c.IgnoreMissingProvider {
+			return err
+		}
+		return nil
 	}
 	if _, err := TraceLevelFromString(c.Level); err != nil {
 		return err
