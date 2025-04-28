@@ -68,4 +68,6 @@ type WindowsEtwConfig struct {
 	// Higher levels include lower levels.
 	// Default is `verbose`.
 	Level string `mapstructure:"level"`
+	// If the given provider is missing, ignore it and continue processing logs.
+	IgnoreMissingProvider bool `mapstructure:"ignore_missing_provider"`
 }
