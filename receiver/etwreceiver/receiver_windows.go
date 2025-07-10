@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/bi-zone/etw"
+	etw "github.com/axoflow/axo-etw"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/pdata/pcommon"
