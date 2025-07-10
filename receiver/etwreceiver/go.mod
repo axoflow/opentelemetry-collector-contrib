@@ -3,7 +3,7 @@ module github.com/open-telemetry/opentelemetry-collector-contrib/receiver/etwrec
 go 1.23.0
 
 require (
-	github.com/bi-zone/etw v0.0.0-20210519083747-fe9042eb0ea8
+	github.com/axoflow/axo-etw v0.0.0-20250527131627-64ca0b074924
 	github.com/stretchr/testify v1.10.0
 	go.opentelemetry.io/collector/component v1.35.0
 	go.opentelemetry.io/collector/component/componenttest v0.129.0
