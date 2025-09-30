@@ -52,6 +52,10 @@ type etwReceiver struct {
 	logsUnmarshaler       plog.JSONUnmarshaler
 	wg                    sync.WaitGroup
 	ignoreMissingProvider bool
+
+	eventChan       chan *plog.Logs
+	eventBufferSize uint
+	numberOfWorkers uint
 }
 
 func (cfg *WindowsEtwConfig) extractProviderGUID() (*windows.GUID, error) {
@@ -77,6 +81,15 @@ func newEtwReceiver(_ context.Context, cfg *WindowsEtwConfig, consumer consumer.
 		return nil, err
 	}
 
+	eventBufferSize := 1000
+	if cfg.EventBufferSize != 0 {
+		eventBufferSize = cfg.EventBufferSize
+	}
+	numberOfWorkers := 1
+	if cfg.NumberOfWorkers != 0 {
+		numberOfWorkers = cfg.NumberOfWorkers
+	}
+
 	guidPtr, err := cfg.extractProviderGUID()
 	if err != nil {
 		settings.Logger.Warn("Could not find provider", zap.Any("provider", cfg.Provider), zap.Error(err))
@@ -89,6 +102,9 @@ func newEtwReceiver(_ context.Context, cfg *WindowsEtwConfig, consumer consumer.
 			logsConsumer:          consumer,
 			logger:                settings.Logger,
 			ignoreMissingProvider: cfg.IgnoreMissingProvider,
+			eventChan:             make(chan *plog.Logs, eventBufferSize),
+			eventBufferSize:       eventBufferSize,
+			numberOfWorkers:       numberOfWorkers,
 		}, nil
 	}
 	guid := *guidPtr
@@ -138,6 +154,9 @@ func newEtwReceiver(_ context.Context, cfg *WindowsEtwConfig, consumer consumer.
 		logger:          settings.Logger,
 		logsUnmarshaler: plog.JSONUnmarshaler{},
 		session:         session,
+		eventChan:       make(chan *plog.Logs, cfg.EventBufferSize),
+		eventBufferSize: eventBufferSize,
+		numberOfWorkers: numberOfWorkers,
 	}, nil
 }
 
@@ -170,27 +189,30 @@ func (r *etwReceiver) Start(ctx context.Context, _ component.Host) error {
 		return nil
 	}
 
+	// start log fetching
+	for range r.numberOfWorkers {
+		r.wg.Add(1)
+		go r.processLogs(cancelCtx)
+	}
+
 	var err error
 	r.wg.Add(1)
 	go func() {
 		defer r.wg.Done()
+		defer close(r.eventChan)
+
 		r.logger.Info("Reading ETW traces")
 		if err := r.session.Process(func(event *etw.Event) {
-			props, _ := event.EventProperties()
-			r.logger.Debug("Received ETW event", zap.Any("event", event), zap.Any("props", props))
-
 			logs, conversionError := r.convertEventToPlogLogs(event)
 			if conversionError != nil {
 				r.logger.Error("Failed to convert ETW event to OTLP log", zap.Error(conversionError))
-				err = conversionError
+				return // Skip this event
 			}
-			r.logger.Debug("Consuming logs", zap.Any("logs", logs))
-			r.obsrecv.StartLogsOp(cancelCtx)
-			count := logs.LogRecordCount()
-			err = r.logsConsumer.ConsumeLogs(cancelCtx, *logs)
-			r.obsrecv.EndLogsOp(cancelCtx, reportFormat, count, err)
-			if err != nil {
-				r.logger.Error("Failed to consume logs", zap.Error(err))
+
+			select {
+			case r.eventChan <- logs:
+			default:
+				r.logger.Debug("Event processing channel full, dropping event")
 			}
 		}); err != nil {
 			r.logger.Error("Failed to read from ETW session", zap.Error(err))
@@ -198,6 +220,34 @@ func (r *etwReceiver) Start(ctx context.Context, _ component.Host) error {
 	}()
 
 	return err
+}
+
+// processLogs handles the log consumption in separate goroutines
+func (r *etwReceiver) processLogs(ctx context.Context) {
+	defer r.wg.Done()
+
+	for {
+		select {
+		case eventData, ok := <-r.eventChan:
+			if !ok {
+				// Channel closed, exit worker
+				return
+			}
+
+			r.logger.Debug("Consuming logs")
+			r.obsrecv.StartLogsOp(ctx)
+			count := eventData.LogRecordCount()
+			err := r.logsConsumer.ConsumeLogs(ctx, *eventData)
+			if err != nil {
+				r.logger.Error("Failed to consume logs", zap.Error(err))
+			}
+			r.obsrecv.EndLogsOp(ctx, reportFormat, count, err)
+
+		case <-ctx.Done():
+			// Context cancelled, exit worker
+			return
+		}
+	}
 }
 
 func etwLevelToSeverityNumber(levelValue uint8) plog.SeverityNumber {
