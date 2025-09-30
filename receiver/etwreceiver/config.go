@@ -70,4 +70,18 @@ type WindowsEtwConfig struct {
 	Level string `mapstructure:"level"`
 	// If the given provider is missing, ignore it and continue processing logs.
 	IgnoreMissingProvider bool `mapstructure:"ignore_missing_provider"`
+	// The following fields control ETW tracing session buffering
+	// See https://learn.microsoft.com/en-us/windows/win32/api/evntrace/ns-evntrace-event_trace_properties
+	// Kilobytes of memory allocated for each event tracing session buffer.
+	// The minimum buffer size is 4 (4KB). The maximum buffer size is 16384 (16MB).
+	BufferSize uint32 `mapstructure:"buffer_size"`
+	// Minimum number of buffers reserved for the tracing session's buffer pool.
+	MinimumBuffers uint32 `mapstructure:"minimum_buffers"`
+	// Maximum number of buffers to be allocated for the tracing session's buffer pool.
+	MaximumBuffers uint32 `mapstructure:"maximum_buffers"`
+	// How often, in seconds, any non-empty trace buffers are flushed.
+	// The minimum flush time is 1 second.
+	// For real-time sessions: Setting FlushTimer to 0 will enable a default timeout of 1 second.
+	// Real-time sessions should set the flush timer based on how quickly the data needs to be received.
+	FlushTimerSeconds uint32 `mapstructure:"flush_timer"`
 }
