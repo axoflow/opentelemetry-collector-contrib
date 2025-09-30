@@ -84,4 +84,9 @@ type WindowsEtwConfig struct {
 	// For real-time sessions: Setting FlushTimer to 0 will enable a default timeout of 1 second.
 	// Real-time sessions should set the flush timer based on how quickly the data needs to be received.
 	FlushTimerSeconds uint32 `mapstructure:"flush_timer"`
+
+	// Number of ETW events the ETW receiver stores in memory for processing.
+	EventBufferSize uint `mapstructure:"event_buffer_size"`
+	// Number of worker goroutines that process ETW events.
+	NumWorkers uint `mapstructure:"num_workers"`
 }
