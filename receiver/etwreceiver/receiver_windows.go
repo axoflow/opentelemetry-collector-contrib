@@ -7,7 +7,6 @@ package etwreceiver // import "github.com/open-telemetry/opentelemetry-collector
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"strings"
 	"sync"
@@ -208,38 +207,48 @@ func (r *etwReceiver) convertEventToPlogLogs(event *etw.Event) (*plog.Logs, erro
 
 	unifiedMap := map[string]any{
 		"EventData": eventProperties,
-		"System":    event,
-	}
-
-	buff, err := json.Marshal(unifiedMap)
-	if err != nil {
-		r.logger.Error("Failed to marshal ETW event", zap.Error(err))
-		return nil, err
-	}
-
-	var rawMap map[string]any
-	if err = json.Unmarshal(buff, &rawMap); err != nil {
-		r.logger.Error("Failed to unmarhsal ETW event", zap.Error(err))
-		return nil, err
+		"System":    r.eventToMap(event),
 	}
 
 	out := plog.NewLogs()
 	logs := out.ResourceLogs()
 	rls := logs.AppendEmpty()
-
 	ills := rls.ScopeLogs().AppendEmpty()
 	lr := ills.LogRecords().AppendEmpty()
 
-	err = lr.Attributes().FromRaw(rawMap)
+	err = lr.Attributes().FromRaw(unifiedMap)
 	if err != nil {
-		r.logger.Error("Failed to populate from rawMap", zap.Error(err))
+		r.logger.Error("Failed to populate from unifiedMap", zap.Error(err))
 		return nil, err
 	}
 
 	lr.SetTimestamp(pcommon.NewTimestampFromTime(event.Header.TimeStamp))
 	lr.SetObservedTimestamp(pcommon.NewTimestampFromTime(time.Now()))
-
 	lr.SetSeverityNumber(etwLevelToSeverityNumber(event.Header.Level))
 
 	return &out, nil
+}
+
+// Convert ETW event to a serializable map
+func (r *etwReceiver) eventToMap(event *etw.Event) map[string]any {
+	header := event.Header
+
+	return map[string]any{
+		"EventID":       header.EventDescriptor.ID,
+		"Version":       header.EventDescriptor.Version,
+		"Channel":       header.EventDescriptor.Channel,
+		"Level":         header.EventDescriptor.Level,
+		"Opcode":        header.EventDescriptor.OpCode,
+		"Task":          header.EventDescriptor.Task,
+		"Keyword":       header.EventDescriptor.Keyword,
+		"ThreadID":      header.ThreadID,
+		"ProcessID":     header.ProcessID,
+		"TimeStamp":     header.TimeStamp.Format(time.RFC3339Nano),
+		"ProviderID":    header.ProviderID.String(),
+		"ActivityID":    header.ActivityID.String(),
+		"Flags":         header.Flags,
+		"KernelTime":    header.KernelTime,
+		"UserTime":      header.UserTime,
+		"ProcessorTime": header.ProcessorTime,
+	}
 }
