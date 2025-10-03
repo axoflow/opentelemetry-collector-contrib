@@ -4,6 +4,9 @@
 package etwreceiver // import "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/etwreceiver"
 
 const (
-	ETWReceiverEventBufferSize = 1000
-	ETWReceiverNumberOfWorkers = 1
+	ETWReceiverEventBufferSize = uint(1000)
+	ETWReceiverNumberOfWorkers = uint(1)
+
+	ETWReceiverMinimumBufferSize = uint32(4)
+	ETWReceiverMaximumBufferSize = uint32(16384)
 )
