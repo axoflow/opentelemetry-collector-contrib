@@ -68,8 +68,13 @@ type WindowsEtwConfig struct {
 	// Higher levels include lower levels.
 	// Default is `verbose`.
 	Level string `mapstructure:"level"`
-	// If the given provider is missing, ignore it and continue processing logs.
-	IgnoreMissingProvider bool `mapstructure:"ignore_missing_provider"`
+	// 64-bit bitmask of keywords that determine the categories of events that you want the provider to write.
+	// The provider typically writes an event if the event's keyword bits match any of the bits set in this value.
+	MatchAnyKeywords uint64 `mapstructure:"match_any_keywords"`
+	// 64-bit bitmask of keywords that restricts the events that you want the provider to write.
+	// The provider typically writes an event if the event's keyword bits match all of the bits set in this value.
+	MatchAllKeywords      uint64 `mapstructure:"match_all_keywords"`
+	IgnoreMissingProvider bool   `mapstructure:"ignore_missing_provider"`
 	// The following fields control ETW tracing session buffering
 	// See https://learn.microsoft.com/en-us/windows/win32/api/evntrace/ns-evntrace-event_trace_properties
 	// Kilobytes of memory allocated for each event tracing session buffer.
