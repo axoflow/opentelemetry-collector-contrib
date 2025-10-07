@@ -122,6 +122,7 @@ func newEtwReceiver(_ context.Context, cfg *WindowsEtwConfig, consumer consumer.
 		etw.WithName(sessionName),
 		etw.WithLevel(etw.TraceLevel(traceLevel)),
 		etw.WithFlushTimer(cfg.FlushTimerSeconds),
+		etw.WithMatchKeywords(cfg.MatchAnyKeywords, cfg.MatchAllKeywords),
 	}
 
 	if cfg.BufferSize != 0 {
