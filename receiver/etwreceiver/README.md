@@ -19,6 +19,8 @@
 | `provider`                | required | Provider to subscribe to                                                                         |
 | `level`                   | optional | Log level of trace events to be included                                                         |
 | `ignore_missing_provider` | false    | Allows the collector to continue working when the given provider is missing                      |
+| `match_any_keywords`      | -        | Filtering for event's keyword bits match any of the bits set in this value                       |
+| `match_all_keywords`      | -        | Filtering for event's keyword bits match all of the bits set in this value                       |
 | `buffer_size`             | -        | Buffer size allocated for each ETW trace session, in kilobytes. Minimum is 4, maximum is 16384.* |
 | `minimum_buffers`         | -        | Minimum number of buffers allocated for each ETW trace session.*                                 |
 | `maximum_buffers`         | -        | Maximum number of buffers allocated for each ETW trace session.*                                 |
