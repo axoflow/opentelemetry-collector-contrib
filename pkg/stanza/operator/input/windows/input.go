@@ -42,7 +42,7 @@ type Input struct {
 	cancel                   context.CancelFunc
 	wg                       sync.WaitGroup
 	subscription             Subscription
-	rateLimit                int
+	maxEventsPerPollCycle    int
 	eventsReadInPollCycle    int
 	remote                   RemoteConfig
 	remoteSessionHandle      windows.Handle
@@ -227,7 +227,7 @@ func (i *Input) read(ctx context.Context) {
 
 // readBatch will read events from the subscription
 func (i *Input) readBatch(ctx context.Context) bool {
-	maxBatchSize := i.getRateLimitedBatchSize()
+	maxBatchSize := i.getCurrentBatchSize()
 	if maxBatchSize == 0 {
 		return false
 	}
@@ -405,10 +405,10 @@ func (i *Input) getPersistKey() string {
 	return i.channel
 }
 
-func (i *Input) getRateLimitedBatchSize() int {
-	if i.rateLimit == 0 {
+func (i *Input) getCurrentBatchSize() int {
+	if i.maxEventsPerPollCycle == 0 {
 		return i.currentMaxReads
 	}
 
-	return min(i.currentMaxReads, i.rateLimit-i.eventsReadInPollCycle)
+	return min(i.currentMaxReads, i.maxEventsPerPollCycle-i.eventsReadInPollCycle)
 }
