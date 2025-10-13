@@ -164,15 +164,15 @@ func newEtwReceiver(_ context.Context, cfg *WindowsEtwConfig, consumer consumer.
 func (r *etwReceiver) Shutdown(_ context.Context) error {
 	r.logger.Info("Shutting down ETW receiver")
 
+	if r.cancel != nil {
+		r.cancel()
+	}
+
 	if r.sessionStarted && r.session != nil {
 		r.sessionStarted = false
 		if err := r.session.Close(); err != nil {
 			return err
 		}
-	}
-
-	if r.cancel != nil {
-		r.cancel()
 	}
 
 	r.wg.Wait()
