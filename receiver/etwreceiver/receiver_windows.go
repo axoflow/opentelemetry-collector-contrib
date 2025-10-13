@@ -203,7 +203,7 @@ func (r *etwReceiver) Start(ctx context.Context, _ component.Host) error {
 		defer close(r.eventChan)
 
 		r.logger.Info("Reading ETW traces")
-		if err := r.session.Process(func(event *etw.Event) {
+		if err = r.session.Process(func(event *etw.Event) {
 			logs, conversionError := r.convertEventToPlogLogs(event)
 			if conversionError != nil {
 				r.logger.Error("Failed to convert ETW event to OTLP log", zap.Error(conversionError))
