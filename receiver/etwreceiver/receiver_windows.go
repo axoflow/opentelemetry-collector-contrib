@@ -241,13 +241,13 @@ func (r *etwReceiver) processLogs(ctx context.Context) {
 			}
 
 			r.logger.Debug("Consuming logs")
-			r.obsrecv.StartLogsOp(ctx)
+			obsCtx := r.obsrecv.StartLogsOp(ctx)
 			count := eventData.LogRecordCount()
-			err := r.logsConsumer.ConsumeLogs(ctx, *eventData)
+			err := r.logsConsumer.ConsumeLogs(obsCtx, *eventData)
 			if err != nil {
 				r.logger.Error("Failed to consume logs", zap.Error(err))
 			}
-			r.obsrecv.EndLogsOp(ctx, reportFormat, count, err)
+			r.obsrecv.EndLogsOp(obsCtx, reportFormat, count, err)
 		}
 	}
 }
