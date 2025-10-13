@@ -68,6 +68,30 @@ type WindowsEtwConfig struct {
 	// Higher levels include lower levels.
 	// Default is `verbose`.
 	Level string `mapstructure:"level"`
-	// If the given provider is missing, ignore it and continue processing logs.
-	IgnoreMissingProvider bool `mapstructure:"ignore_missing_provider"`
+	// 64-bit bitmask of keywords that determine the categories of events that you want the provider to write.
+	// The provider typically writes an event if the event's keyword bits match any of the bits set in this value.
+	MatchAnyKeywords uint64 `mapstructure:"match_any_keywords"`
+	// 64-bit bitmask of keywords that restricts the events that you want the provider to write.
+	// The provider typically writes an event if the event's keyword bits match all of the bits set in this value.
+	MatchAllKeywords      uint64 `mapstructure:"match_all_keywords"`
+	IgnoreMissingProvider bool   `mapstructure:"ignore_missing_provider"`
+	// The following fields control ETW tracing session buffering
+	// See https://learn.microsoft.com/en-us/windows/win32/api/evntrace/ns-evntrace-event_trace_properties
+	// Kilobytes of memory allocated for each event tracing session buffer.
+	// The minimum buffer size is 4 (4KB). The maximum buffer size is 16384 (16MB).
+	BufferSize uint32 `mapstructure:"buffer_size"`
+	// Minimum number of buffers reserved for the tracing session's buffer pool.
+	MinimumBuffers uint32 `mapstructure:"minimum_buffers"`
+	// Maximum number of buffers to be allocated for the tracing session's buffer pool.
+	MaximumBuffers uint32 `mapstructure:"maximum_buffers"`
+	// How often, in seconds, any non-empty trace buffers are flushed.
+	// The minimum flush time is 1 second.
+	// For real-time sessions: Setting FlushTimer to 0 will enable a default timeout of 1 second.
+	// Real-time sessions should set the flush timer based on how quickly the data needs to be received.
+	FlushTimerSeconds uint32 `mapstructure:"flush_timer"`
+
+	// Number of ETW events the ETW receiver stores in memory for processing.
+	EventBufferSize uint `mapstructure:"event_buffer_size"`
+	// Number of worker goroutines that process ETW events.
+	NumWorkers uint `mapstructure:"num_workers"`
 }

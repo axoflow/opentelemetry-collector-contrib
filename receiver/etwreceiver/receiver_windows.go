@@ -7,7 +7,6 @@ package etwreceiver // import "github.com/open-telemetry/opentelemetry-collector
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"strings"
 	"sync"
@@ -53,6 +52,10 @@ type etwReceiver struct {
 	logsUnmarshaler       plog.JSONUnmarshaler
 	wg                    sync.WaitGroup
 	ignoreMissingProvider bool
+
+	eventChan       chan *plog.Logs
+	eventBufferSize uint
+	numberOfWorkers uint
 }
 
 func (cfg *WindowsEtwConfig) extractProviderGUID() (*windows.GUID, error) {
@@ -78,6 +81,15 @@ func newEtwReceiver(_ context.Context, cfg *WindowsEtwConfig, consumer consumer.
 		return nil, err
 	}
 
+	eventBufferSize := uint(ETWReceiverEventBufferSize)
+	if cfg.EventBufferSize != 0 {
+		eventBufferSize = cfg.EventBufferSize
+	}
+	numberOfWorkers := uint(ETWReceiverNumberOfWorkers)
+	if cfg.NumWorkers != 0 {
+		numberOfWorkers = cfg.NumWorkers
+	}
+
 	guidPtr, err := cfg.extractProviderGUID()
 	if err != nil {
 		settings.Logger.Warn("Could not find provider", zap.Any("provider", cfg.Provider), zap.Error(err))
@@ -90,6 +102,9 @@ func newEtwReceiver(_ context.Context, cfg *WindowsEtwConfig, consumer consumer.
 			logsConsumer:          consumer,
 			logger:                settings.Logger,
 			ignoreMissingProvider: cfg.IgnoreMissingProvider,
+			eventChan:             make(chan *plog.Logs, eventBufferSize),
+			eventBufferSize:       eventBufferSize,
+			numberOfWorkers:       numberOfWorkers,
 		}, nil
 	}
 	guid := *guidPtr
@@ -103,7 +118,26 @@ func newEtwReceiver(_ context.Context, cfg *WindowsEtwConfig, consumer consumer.
 
 	sessionName := strings.Join([]string{sessionNamePrefix, settings.ID.String()}, "-")
 	var exists etw.ExistsError
-	session, err := etw.NewSession(guid, etw.WithName(sessionName), etw.WithLevel(etw.TraceLevel(traceLevel)))
+	sessionOpts := []etw.Option{
+		etw.WithName(sessionName),
+		etw.WithLevel(etw.TraceLevel(traceLevel)),
+		etw.WithFlushTimer(cfg.FlushTimerSeconds),
+		etw.WithMatchKeywords(cfg.MatchAnyKeywords, cfg.MatchAllKeywords),
+	}
+
+	if cfg.BufferSize != 0 {
+		sessionOpts = append(sessionOpts, etw.WithBufferSize(cfg.BufferSize))
+	}
+
+	if cfg.MinimumBuffers != 0 {
+		sessionOpts = append(sessionOpts, etw.WithMinimumBuffers(cfg.MinimumBuffers))
+	}
+
+	if cfg.MaximumBuffers != 0 {
+		sessionOpts = append(sessionOpts, etw.WithMaximumBuffers(cfg.MaximumBuffers))
+	}
+
+	session, err := etw.NewSession(guid, sessionOpts...)
 	if errors.As(err, &exists) {
 		settings.Logger.Info("ETW session already exists, deleting previous session, then creating new one", zap.String("session_name", exists.SessionName))
 		err = etw.KillSession(exists.SessionName)
@@ -121,21 +155,24 @@ func newEtwReceiver(_ context.Context, cfg *WindowsEtwConfig, consumer consumer.
 		logger:          settings.Logger,
 		logsUnmarshaler: plog.JSONUnmarshaler{},
 		session:         session,
+		eventChan:       make(chan *plog.Logs, eventBufferSize),
+		eventBufferSize: eventBufferSize,
+		numberOfWorkers: numberOfWorkers,
 	}, nil
 }
 
 func (r *etwReceiver) Shutdown(_ context.Context) error {
 	r.logger.Info("Shutting down ETW receiver")
 
+	if r.cancel != nil {
+		r.cancel()
+	}
+
 	if r.sessionStarted && r.session != nil {
 		r.sessionStarted = false
 		if err := r.session.Close(); err != nil {
 			return err
 		}
-	}
-
-	if r.cancel != nil {
-		r.cancel()
 	}
 
 	r.wg.Wait()
@@ -153,27 +190,32 @@ func (r *etwReceiver) Start(ctx context.Context, _ component.Host) error {
 		return nil
 	}
 
+	// start log fetching
+	for range r.numberOfWorkers {
+		r.wg.Add(1)
+		go r.processLogs(cancelCtx)
+	}
+
 	var err error
 	r.wg.Add(1)
 	go func() {
 		defer r.wg.Done()
-		r.logger.Info("Reading ETW traces")
-		if err := r.session.Process(func(event *etw.Event) {
-			props, _ := event.EventProperties()
-			r.logger.Debug("Received ETW event", zap.Any("event", event), zap.Any("props", props))
+		defer close(r.eventChan)
 
+		r.logger.Info("Reading ETW traces")
+		if err = r.session.Process(func(event *etw.Event) {
 			logs, conversionError := r.convertEventToPlogLogs(event)
 			if conversionError != nil {
 				r.logger.Error("Failed to convert ETW event to OTLP log", zap.Error(conversionError))
-				err = conversionError
+				return // Skip this event
 			}
-			r.logger.Debug("Consuming logs", zap.Any("logs", logs))
-			r.obsrecv.StartLogsOp(cancelCtx)
-			count := logs.LogRecordCount()
-			err = r.logsConsumer.ConsumeLogs(cancelCtx, *logs)
-			r.obsrecv.EndLogsOp(cancelCtx, reportFormat, count, err)
-			if err != nil {
-				r.logger.Error("Failed to consume logs", zap.Error(err))
+
+			select {
+			case <-ctx.Done():
+				return
+			case r.eventChan <- logs:
+			default:
+				r.logger.Debug("Event processing channel full, dropping event")
 			}
 		}); err != nil {
 			r.logger.Error("Failed to read from ETW session", zap.Error(err))
@@ -181,6 +223,33 @@ func (r *etwReceiver) Start(ctx context.Context, _ component.Host) error {
 	}()
 
 	return err
+}
+
+// processLogs handles the log consumption in separate goroutines
+func (r *etwReceiver) processLogs(ctx context.Context) {
+	defer r.wg.Done()
+
+	for {
+		select {
+		case <-ctx.Done():
+			// Context cancelled, exit worker
+			return
+		case eventData, ok := <-r.eventChan:
+			if !ok {
+				// Channel closed, exit worker
+				return
+			}
+
+			r.logger.Debug("Consuming logs")
+			obsCtx := r.obsrecv.StartLogsOp(ctx)
+			count := eventData.LogRecordCount()
+			err := r.logsConsumer.ConsumeLogs(obsCtx, *eventData)
+			if err != nil {
+				r.logger.Error("Failed to consume logs", zap.Error(err))
+			}
+			r.obsrecv.EndLogsOp(obsCtx, reportFormat, count, err)
+		}
+	}
 }
 
 func etwLevelToSeverityNumber(levelValue uint8) plog.SeverityNumber {
@@ -208,38 +277,48 @@ func (r *etwReceiver) convertEventToPlogLogs(event *etw.Event) (*plog.Logs, erro
 
 	unifiedMap := map[string]any{
 		"EventData": eventProperties,
-		"System":    event,
-	}
-
-	buff, err := json.Marshal(unifiedMap)
-	if err != nil {
-		r.logger.Error("Failed to marshal ETW event", zap.Error(err))
-		return nil, err
-	}
-
-	var rawMap map[string]any
-	if err = json.Unmarshal(buff, &rawMap); err != nil {
-		r.logger.Error("Failed to unmarhsal ETW event", zap.Error(err))
-		return nil, err
+		"System":    r.eventToMap(event),
 	}
 
 	out := plog.NewLogs()
 	logs := out.ResourceLogs()
 	rls := logs.AppendEmpty()
-
 	ills := rls.ScopeLogs().AppendEmpty()
 	lr := ills.LogRecords().AppendEmpty()
 
-	err = lr.Attributes().FromRaw(rawMap)
+	err = lr.Attributes().FromRaw(unifiedMap)
 	if err != nil {
-		r.logger.Error("Failed to populate from rawMap", zap.Error(err))
+		r.logger.Error("Failed to populate from unifiedMap", zap.Error(err))
 		return nil, err
 	}
 
 	lr.SetTimestamp(pcommon.NewTimestampFromTime(event.Header.TimeStamp))
 	lr.SetObservedTimestamp(pcommon.NewTimestampFromTime(time.Now()))
-
 	lr.SetSeverityNumber(etwLevelToSeverityNumber(event.Header.Level))
 
 	return &out, nil
+}
+
+// Convert ETW event to a serializable map
+func (r *etwReceiver) eventToMap(event *etw.Event) map[string]any {
+	header := event.Header
+
+	return map[string]any{
+		"EventID":       header.EventDescriptor.ID,
+		"Version":       header.EventDescriptor.Version,
+		"Channel":       header.EventDescriptor.Channel,
+		"Level":         header.EventDescriptor.Level,
+		"Opcode":        header.EventDescriptor.OpCode,
+		"Task":          header.EventDescriptor.Task,
+		"Keyword":       header.EventDescriptor.Keyword,
+		"ThreadID":      header.ThreadID,
+		"ProcessID":     header.ProcessID,
+		"TimeStamp":     header.TimeStamp.Format(time.RFC3339Nano),
+		"ProviderID":    header.ProviderID.String(),
+		"ActivityID":    header.ActivityID.String(),
+		"Flags":         header.Flags,
+		"KernelTime":    header.KernelTime,
+		"UserTime":      header.UserTime,
+		"ProcessorTime": header.ProcessorTime,
+	}
 }
