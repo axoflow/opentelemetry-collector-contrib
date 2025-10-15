@@ -17,10 +17,10 @@ func (c *WindowsEtwConfig) Validate() error {
 	if _, err := TraceLevelFromString(c.Level); err != nil {
 		return err
 	}
-	if c.BufferSize < ETWReceiverMinimumBufferSize {
+	if c.BufferSize != nil && *c.BufferSize < ETWReceiverMinimumBufferSize {
 		return fmt.Errorf("buffer_size must be at least %v (in KB)", ETWReceiverMinimumBufferSize)
 	}
-	if c.BufferSize > ETWReceiverMaximumBufferSize {
+	if c.BufferSize != nil && *c.BufferSize > ETWReceiverMaximumBufferSize {
 		return fmt.Errorf("buffer_size must be at most %v (in KB)", ETWReceiverMaximumBufferSize)
 	}
 	return nil
