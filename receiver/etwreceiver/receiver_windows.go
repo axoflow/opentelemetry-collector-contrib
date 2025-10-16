@@ -125,8 +125,8 @@ func newEtwReceiver(_ context.Context, cfg *WindowsEtwConfig, consumer consumer.
 		etw.WithMatchKeywords(cfg.MatchAnyKeywords, cfg.MatchAllKeywords),
 	}
 
-	if cfg.BufferSize != 0 {
-		sessionOpts = append(sessionOpts, etw.WithBufferSize(cfg.BufferSize))
+	if cfg.BufferSize != nil {
+		sessionOpts = append(sessionOpts, etw.WithBufferSize(*cfg.BufferSize))
 	}
 
 	if cfg.MinimumBuffers != 0 {

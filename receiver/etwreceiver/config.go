@@ -79,7 +79,7 @@ type WindowsEtwConfig struct {
 	// See https://learn.microsoft.com/en-us/windows/win32/api/evntrace/ns-evntrace-event_trace_properties
 	// Kilobytes of memory allocated for each event tracing session buffer.
 	// The minimum buffer size is 4 (4KB). The maximum buffer size is 16384 (16MB).
-	BufferSize uint32 `mapstructure:"buffer_size"`
+	BufferSize *uint32 `mapstructure:"buffer_size"`
 	// Minimum number of buffers reserved for the tracing session's buffer pool.
 	MinimumBuffers uint32 `mapstructure:"minimum_buffers"`
 	// Maximum number of buffers to be allocated for the tracing session's buffer pool.
