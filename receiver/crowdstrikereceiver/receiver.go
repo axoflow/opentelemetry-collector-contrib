@@ -6,11 +6,13 @@ package crowdstrikereceiver // import "github.com/open-telemetry/opentelemetry-c
 import (
 	"context"
 
+	"github.com/crowdstrike/gofalcon/falcon/client"
 	"go.opentelemetry.io/collector/component"
 )
 
 type crowdstrikeReceiver struct {
 	cancel context.CancelFunc
+	client *client.CrowdStrikeAPISpecification
 }
 
 func (r *crowdstrikeReceiver) Shutdown(_ context.Context) error {
