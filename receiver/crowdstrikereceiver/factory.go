@@ -38,5 +38,10 @@ func newCrowdstrikeReceiver(_ context.Context, cfg *CrowdstrikeReceiverConfig, c
 	// if err != nil {
 	//  return nil, err
 	// }
-	return &crowdstrikeReceiver{}, nil
+	return &crowdstrikeReceiver{
+		logger:       settings.Logger,
+		nextConsumer: consumer,
+		config:       cfg,
+		mockClient:   &mockAlertsClient{},
+	}, nil
 }
