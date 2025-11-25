@@ -5,7 +5,9 @@ package crowdstrikereceiver // import "github.com/open-telemetry/opentelemetry-c
 
 import (
 	"context"
+	"time"
 
+	"github.com/crowdstrike/gofalcon/falcon"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/crowdstrikereceiver/internal/metadata"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer"
@@ -33,15 +35,37 @@ func createLogsReceiver(ctx context.Context, settings receiver.Settings, cc comp
 	return newCrowdstrikeReceiver(ctx, cc.(*CrowdstrikeReceiverConfig), consumer, settings)
 }
 
-func newCrowdstrikeReceiver(_ context.Context, cfg *CrowdstrikeReceiverConfig, consumer consumer.Logs, settings receiver.Settings) (receiver.Logs, error) {
-	// client, err := falcon.NewClient(&falcon.ApiConfig{})
-	// if err != nil {
-	//  return nil, err
-	// }
+func newCrowdstrikeReceiver(ctx context.Context, cfg *CrowdstrikeReceiverConfig, consumer consumer.Logs, settings receiver.Settings) (receiver.Logs, error) {
+	var cloudType falcon.CloudType = falcon.CloudAutoDiscover
+	if cfg.Cloud != "" {
+		c, err := falcon.CloudValidate(cfg.Cloud)
+		if err != nil {
+			return nil, err
+		}
+		cloudType = c
+	}
+	client, err := falcon.NewClient(&falcon.ApiConfig{
+		AccessToken:      cfg.AccessToken,
+		ClientId:         cfg.ClientID,
+		ClientSecret:     cfg.ClientSecret,
+		Cloud:            cloudType,
+		Context:          ctx,
+		MemberCID:        cfg.MemberCID,
+		HostOverride:     cfg.HostOverride,
+		BasePathOverride: cfg.BasePathOverride,
+	})
+	if err != nil {
+		return nil, err
+	}
+	pollInterval := time.Duration(1) * time.Second
+	if cfg.PollInterval != nil {
+		pollInterval = *cfg.PollInterval
+	}
 	return &crowdstrikeReceiver{
 		logger:       settings.Logger,
 		nextConsumer: consumer,
 		config:       cfg,
-		mockClient:   &mockAlertsClient{},
+		client:       client,
+		pollInterval: pollInterval,
 	}, nil
 }

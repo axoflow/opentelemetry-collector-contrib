@@ -23,7 +23,7 @@ type crowdstrikeReceiver struct {
 	nextConsumer consumer.Logs
 	config       *CrowdstrikeReceiverConfig
 	client       *client.CrowdStrikeAPISpecification
-	mockClient   *mockAlertsClient
+	pollInterval time.Duration
 }
 
 func (r *crowdstrikeReceiver) Shutdown(_ context.Context) error {
@@ -37,10 +37,8 @@ func (r *crowdstrikeReceiver) Start(ctx context.Context, _ component.Host) error
 	ctx = context.Background()
 	ctx, r.cancel = context.WithCancel(ctx)
 
-	interval := 1 * time.Second
-
 	go func() {
-		ticker := time.NewTicker(interval)
+		ticker := time.NewTicker(r.pollInterval)
 		defer ticker.Stop()
 
 		for {
@@ -48,10 +46,8 @@ func (r *crowdstrikeReceiver) Start(ctx context.Context, _ component.Host) error
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				r.logger.Info("CrowdStrike receiver tick")
-				// TODO: switch to real client
-				// alerts, err := r.client.Alerts.GetV2(alerts.NewGetV2Params())
-				alerts, err := r.mockClient.GetV2(alerts.NewGetV2Params())
+				r.logger.Debug("CrowdStrike receiver tick")
+				alerts, err := r.client.Alerts.GetV2(alerts.NewGetV2Params())
 				if err != nil {
 					r.logger.Error("Error fetching alerts from CrowdStrike", zap.Error(err))
 					continue
