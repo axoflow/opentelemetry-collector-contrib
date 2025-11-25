@@ -3,7 +3,11 @@
 
 package crowdstrikereceiver // import "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/crowdstrikereceiver"
 
-import "time"
+import (
+	"time"
+
+	"go.opentelemetry.io/collector/config/configtls"
+)
 
 type CrowdstrikeReceiverConfig struct {
 	// AccessToken is the access token used to access the CrowdStrike Falcon platform.
@@ -35,4 +39,7 @@ type CrowdstrikeReceiverConfig struct {
 
 	// Debug enables debug logging of all HTTP traffic going through the API runtime.
 	Debug bool `mapstructure:"debug"`
+
+	// TLS settings
+	TLS configtls.ClientConfig `mapstructure:"tls,omitempty"`
 }
