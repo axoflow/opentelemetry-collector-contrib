@@ -47,18 +47,56 @@ func (r *crowdstrikeReceiver) Start(ctx context.Context, _ component.Host) error
 				return
 			case <-ticker.C:
 				r.logger.Debug("CrowdStrike receiver tick")
+
 				alerts, err := r.client.Alerts.GetV2(alerts.NewGetV2Params())
 				if err != nil {
 					r.logger.Error("Error fetching alerts from CrowdStrike", zap.Error(err))
 					continue
 				}
-				logs, err := convertAlertToPlogLogs(alerts)
-				if err != nil {
-					r.logger.Error("Error converting alerts to plog.Logs", zap.Error(err))
+
+				// Log rate limit information
+				r.logger.Debug("CrowdStrike API rate limits",
+					zap.String("trace_id", alerts.XCSTRACEID),
+					zap.Int64("rate_limit", alerts.XRateLimitLimit),
+					zap.Int64("rate_limit_remaining", alerts.XRateLimitRemaining),
+				)
+
+				// Check rate limit and adjust polling if needed
+				if alerts.XRateLimitRemaining < alerts.XRateLimitLimit/10 { // Less than 10% remaining
+					r.logger.Warn("CrowdStrike API rate limit nearly exhausted, backing off",
+						zap.Int64("remaining", alerts.XRateLimitRemaining),
+						zap.Int64("limit", alerts.XRateLimitLimit),
+					)
+					// Temporarily slow down polling by waiting extra time
+					backoffDuration := r.pollInterval * 2
+					select {
+					case <-ctx.Done():
+						return
+					case <-time.After(backoffDuration):
+						// Continue after backoff
+					}
+				}
+
+				// Check if we have alerts in the payload
+				if alerts.Payload == nil {
+					r.logger.Debug("No alerts returned from CrowdStrike")
 					continue
 				}
+
+				logs, err := convertAlertToPlogLogs(alerts)
+				if err != nil {
+					r.logger.Error("Error converting alerts to plog.Logs",
+						zap.Error(err),
+						zap.String("trace_id", alerts.XCSTRACEID),
+					)
+					continue
+				}
+
 				if err = r.nextConsumer.ConsumeLogs(ctx, *logs); err != nil {
-					r.logger.Error("Error consuming logs", zap.Error(err))
+					r.logger.Error("Error consuming logs",
+						zap.Error(err),
+						zap.String("trace_id", alerts.XCSTRACEID),
+					)
 				}
 			}
 		}
