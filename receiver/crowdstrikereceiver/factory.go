@@ -41,7 +41,6 @@ func createLogsReceiver(ctx context.Context, settings receiver.Settings, cc comp
 }
 
 func newCrowdstrikeReceiver(ctx context.Context, cfg *CrowdstrikeReceiverConfig, consumer consumer.Logs, settings receiver.Settings) (receiver.Logs, error) {
-	ctx = context.Background()
 	logger := settings.Logger.With(zap.String("receiver", "crowdstrikereceiver"))
 
 	if cfg.TLS.InsecureSkipVerify {
