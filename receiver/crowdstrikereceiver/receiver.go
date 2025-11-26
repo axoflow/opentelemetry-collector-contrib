@@ -10,6 +10,7 @@ import (
 
 	"github.com/crowdstrike/gofalcon/falcon/client"
 	"github.com/crowdstrike/gofalcon/falcon/client/alerts"
+	"github.com/crowdstrike/gofalcon/falcon/models"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/pdata/pcommon"
@@ -47,8 +48,16 @@ func (r *crowdstrikeReceiver) Start(ctx context.Context, _ component.Host) error
 				return
 			case <-ticker.C:
 				r.logger.Debug("CrowdStrike receiver tick")
+				queries, err := r.client.Alerts.QueryV2(alerts.NewQueryV2Params())
+				if err != nil {
+					r.logger.Error("Error querying alerts from CrowdStrike", zap.Error(err))
+					continue
+				}
+				paramsCompositeIDs := models.DetectsapiPostEntitiesAlertsV2Request{
+					CompositeIds: queries.GetPayload().Resources,
+				}
 
-				alerts, err := r.client.Alerts.GetV2(alerts.NewGetV2Params())
+				alerts, err := r.client.Alerts.GetV2(alerts.NewGetV2Params().WithBody(&paramsCompositeIDs))
 				if err != nil {
 					r.logger.Error("Error fetching alerts from CrowdStrike", zap.Error(err))
 					continue
