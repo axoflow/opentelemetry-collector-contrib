@@ -1,0 +1,20 @@
+display_name: Elasticsearch Logs Receiver
+type: elasticsearchlogs
+
+description: |
+  This receiver queries an Elasticsearch [_search](https://www.elastic.co/guide/en/elasticsearch/reference/current/search-search.html)
+  endpoint on an interval and emits the matching documents as logs. It paginates through results using
+  [`search_after`](https://www.elastic.co/guide/en/elasticsearch/reference/current/paginate-search-results.html#search-after)
+  with a stable sort, and can persist its cursor to a storage extension so that it resumes where it left
+  off across collector restarts.
+
+status:
+  class: receiver
+  stability:
+    development: [logs]
+  distributions: [contrib]
+  codeowners:
+    active: [axoflow]
+
+tests:
+  skip_lifecycle: true
