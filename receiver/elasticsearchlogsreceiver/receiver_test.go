@@ -174,6 +174,26 @@ func TestConvertHits(t *testing.T) {
 	assert.Equal(t, []any{"2026-06-17T10:00:01.000Z", "b"}, lastSort)
 }
 
+func TestHasDescendingSort(t *testing.T) {
+	cases := []struct {
+		name string
+		sort []map[string]string
+		want bool
+	}{
+		{"all asc", []map[string]string{{"@timestamp": "asc"}, {"seq": "asc"}}, false},
+		{"tiebreaker desc", []map[string]string{{"@timestamp": "asc"}, {"seq": "desc"}}, true},
+		{"primary desc", []map[string]string{{"@timestamp": "desc"}}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := validConfig()
+			cfg.Sort = tc.sort
+			r := newLogsReceiver(receivertest.NewNopSettings(metadata.Type), cfg, consumertest.NewNop())
+			assert.Equal(t, tc.want, r.hasDescendingSort())
+		})
+	}
+}
+
 func TestParseTimestamp(t *testing.T) {
 	cases := []struct {
 		name  string
