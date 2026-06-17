@@ -1,0 +1,248 @@
+// Copyright The OpenTelemetry Authors
+// SPDX-License-Identifier: Apache-2.0
+
+package elasticsearchlogsreceiver // import "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/elasticsearchlogsreceiver"
+
+import (
+	"context"
+	"sync"
+	"time"
+
+	"go.opentelemetry.io/collector/component"
+	"go.opentelemetry.io/collector/consumer"
+	"go.opentelemetry.io/collector/pdata/pcommon"
+	"go.opentelemetry.io/collector/pdata/plog"
+	"go.opentelemetry.io/collector/receiver"
+	"go.uber.org/zap"
+
+	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/elasticsearchlogsreceiver/internal/metadata"
+)
+
+// timestampLayouts are the formats tried, in order, when parsing the configured timestamp field.
+var timestampLayouts = []string{
+	time.RFC3339Nano,
+	time.RFC3339,
+	"2006-01-02T15:04:05.000Z0700",
+	"2006-01-02T15:04:05Z0700",
+}
+
+type logsReceiver struct {
+	cfg      *Config
+	settings receiver.Settings
+	consumer consumer.Logs
+	logger   *zap.Logger
+
+	client    esLogsClient
+	persister *cursorPersister
+
+	// cursor is the search_after value from the last consumed document.
+	cursor []any
+	// lowerBound is the inclusive start time applied on a fresh start; the zero value means no bound.
+	lowerBound time.Time
+
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
+}
+
+func newLogsReceiver(settings receiver.Settings, cfg *Config, consumer consumer.Logs) *logsReceiver {
+	return &logsReceiver{
+		cfg:      cfg,
+		settings: settings,
+		consumer: consumer,
+		logger:   settings.Logger,
+	}
+}
+
+func (r *logsReceiver) Start(ctx context.Context, host component.Host) error {
+	client, err := newESLogsClient(ctx, r.settings.TelemetrySettings, r.cfg, host)
+	if err != nil {
+		return err
+	}
+	r.client = client
+
+	storageClient, err := getStorageClient(ctx, host, r.cfg.StorageID, r.settings.ID)
+	if err != nil {
+		return err
+	}
+	r.persister = newCursorPersister(storageClient)
+
+	cursor, err := r.persister.Load(ctx)
+	if err != nil {
+		return err
+	}
+	if cursor != nil {
+		r.cursor = cursor
+		r.logger.Info("resuming from persisted cursor", zap.Any("search_after", cursor))
+	} else if r.cfg.StartAt == startAtEnd {
+		// On a fresh start, only read documents at or after now - initial_lookback.
+		r.lowerBound = time.Now().Add(-r.cfg.InitialLookback)
+	}
+
+	pollCtx, cancel := context.WithCancel(context.Background())
+	r.cancel = cancel
+	r.wg.Add(1)
+	go r.run(pollCtx)
+	return nil
+}
+
+func (r *logsReceiver) Shutdown(ctx context.Context) error {
+	if r.cancel != nil {
+		r.cancel()
+	}
+	r.wg.Wait()
+	if r.persister != nil {
+		return r.persister.Close(ctx)
+	}
+	return nil
+}
+
+func (r *logsReceiver) run(ctx context.Context) {
+	defer r.wg.Done()
+
+	if r.cfg.InitialDelay > 0 {
+		timer := time.NewTimer(r.cfg.InitialDelay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+	}
+
+	r.pollOnce(ctx)
+
+	ticker := time.NewTicker(r.cfg.PollInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			r.pollOnce(ctx)
+		}
+	}
+}
+
+// pollOnce runs a single search cycle, paginating with search_after until the index is exhausted.
+func (r *logsReceiver) pollOnce(ctx context.Context) {
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+
+		req := searchRequest{
+			Size:        r.cfg.PageSize,
+			Query:       r.buildQuery(),
+			Sort:        r.cfg.Sort,
+			SearchAfter: r.cursor,
+		}
+
+		resp, err := r.client.Search(ctx, req)
+		if err != nil {
+			r.logger.Error("failed to query Elasticsearch", zap.Error(err))
+			return
+		}
+
+		hits := resp.Hits.Hits
+		if len(hits) == 0 {
+			return
+		}
+
+		logs, nextCursor := r.convertHits(hits)
+		if err := r.consumer.ConsumeLogs(ctx, logs); err != nil {
+			r.logger.Error("failed to consume logs; will retry from last cursor", zap.Error(err))
+			return
+		}
+
+		if len(nextCursor) == 0 {
+			r.logger.Error("documents are missing sort values; cannot paginate with search_after, check the 'sort' configuration")
+			return
+		}
+
+		r.cursor = nextCursor
+		if err := r.persister.Save(ctx, r.cursor); err != nil {
+			r.logger.Warn("failed to persist cursor; progress may be lost on restart", zap.Error(err))
+		}
+
+		// A short page means we have caught up; wait for the next tick.
+		if len(hits) < r.cfg.PageSize {
+			return
+		}
+	}
+}
+
+// buildQuery assembles the Elasticsearch query. Once a cursor exists, search_after carries the
+// position so only the user-provided filter is sent; on a fresh start the configured lower time
+// bound is ANDed with the user filter.
+func (r *logsReceiver) buildQuery() map[string]any {
+	if r.cursor != nil || r.lowerBound.IsZero() {
+		return r.cfg.Query
+	}
+
+	filters := []any{
+		map[string]any{
+			"range": map[string]any{
+				r.cfg.TimestampField: map[string]any{
+					"gte": r.lowerBound.UTC().Format(time.RFC3339Nano),
+				},
+			},
+		},
+	}
+	if len(r.cfg.Query) > 0 {
+		filters = append(filters, r.cfg.Query)
+	}
+	return map[string]any{
+		"bool": map[string]any{
+			"filter": filters,
+		},
+	}
+}
+
+func (r *logsReceiver) convertHits(hits []searchHit) (plog.Logs, []any) {
+	logs := plog.NewLogs()
+	rl := logs.ResourceLogs().AppendEmpty()
+	sl := rl.ScopeLogs().AppendEmpty()
+	sl.Scope().SetName(metadata.ScopeName)
+
+	now := pcommon.NewTimestampFromTime(time.Now())
+	var lastSort []any
+
+	for _, h := range hits {
+		lr := sl.LogRecords().AppendEmpty()
+		lr.SetObservedTimestamp(now)
+		if ts, ok := parseTimestamp(h.Source[r.cfg.TimestampField]); ok {
+			lr.SetTimestamp(pcommon.NewTimestampFromTime(ts))
+		}
+		if err := lr.Body().SetEmptyMap().FromRaw(h.Source); err != nil {
+			r.logger.Debug("failed to set log body from _source", zap.Error(err))
+		}
+		if h.Index != "" {
+			lr.Attributes().PutStr("elasticsearch.index", h.Index)
+		}
+		if h.ID != "" {
+			lr.Attributes().PutStr("elasticsearch.id", h.ID)
+		}
+		if len(h.Sort) > 0 {
+			lastSort = h.Sort
+		}
+	}
+
+	return logs, lastSort
+}
+
+func parseTimestamp(v any) (time.Time, bool) {
+	switch t := v.(type) {
+	case string:
+		for _, layout := range timestampLayouts {
+			if parsed, err := time.Parse(layout, t); err == nil {
+				return parsed, true
+			}
+		}
+	case float64:
+		// Elasticsearch commonly emits date sort/source values as epoch milliseconds.
+		sec := int64(t) / 1000
+		nsec := (int64(t) % 1000) * int64(time.Millisecond)
+		return time.Unix(sec, nsec).UTC(), true
+	}
+	return time.Time{}, false
+}
