@@ -10,9 +10,11 @@ endpoint on a fixed interval and emits the matching documents as logs.
 
 It paginates through results using [`search_after`](https://www.elastic.co/guide/en/elasticsearch/reference/current/paginate-search-results.html#search-after)
 combined with a stable sort, which is more efficient and reliable than deep `from`/`size` paging.
-When a [storage extension](https://github.com/open-telemetry/opentelemetry-collector-contrib/tree/main/extension/storage)
-is configured, the receiver persists its `search_after` cursor so that, after a collector restart,
-it resumes from where it stopped instead of re-reading or skipping documents.
+Each configured index pattern is queried, paginated and checkpointed **independently**, so one slow or
+failing index does not hold up the others. When a
+[storage extension](https://github.com/open-telemetry/opentelemetry-collector-contrib/tree/main/extension/storage)
+is configured, the receiver persists a per-index `search_after` cursor so that, after a collector
+restart, each index resumes from where it stopped instead of re-reading or skipping documents.
 
 ## How it works
 

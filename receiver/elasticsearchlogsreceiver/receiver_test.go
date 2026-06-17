@@ -20,25 +20,46 @@ import (
 	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/elasticsearchlogsreceiver/internal/metadata"
 )
 
-// fakeClient returns canned pages of hits, one per Search call.
+type searchCall struct {
+	index string
+	req   searchRequest
+}
+
+// fakeClient returns canned pages of hits per index, one page per Search call for that index.
 type fakeClient struct {
-	pages [][]searchHit
-	calls []searchRequest
-	idx   int
+	pages map[string][][]searchHit
+	idx   map[string]int
+	calls []searchCall
 	err   error
 }
 
-func (f *fakeClient) Search(_ context.Context, req searchRequest) (*searchResponse, error) {
-	f.calls = append(f.calls, req)
+func newFakeClient(pages map[string][][]searchHit) *fakeClient {
+	return &fakeClient{pages: pages, idx: map[string]int{}}
+}
+
+func (f *fakeClient) Search(_ context.Context, index string, req searchRequest) (*searchResponse, error) {
+	f.calls = append(f.calls, searchCall{index: index, req: req})
 	if f.err != nil {
 		return nil, f.err
 	}
 	resp := &searchResponse{}
-	if f.idx < len(f.pages) {
-		resp.Hits.Hits = f.pages[f.idx]
-		f.idx++
+	pages := f.pages[index]
+	if i := f.idx[index]; i < len(pages) {
+		resp.Hits.Hits = pages[i]
+		f.idx[index] = i + 1
 	}
 	return resp, nil
+}
+
+// callsFor returns the requests issued against a given index, in order.
+func (f *fakeClient) callsFor(index string) []searchRequest {
+	var reqs []searchRequest
+	for _, c := range f.calls {
+		if c.index == index {
+			reqs = append(reqs, c.req)
+		}
+	}
+	return reqs
 }
 
 // memStorage is an in-memory storage.Client for tests.
@@ -77,10 +98,12 @@ func hit(index, id, ts string) searchHit {
 }
 
 func TestPollOncePaginatesAndCheckpoints(t *testing.T) {
-	client := &fakeClient{pages: [][]searchHit{
-		{hit("logs-1", "a", "2026-06-17T10:00:00.000Z"), hit("logs-1", "b", "2026-06-17T10:00:01.000Z")},
-		{hit("logs-1", "c", "2026-06-17T10:00:02.000Z")},
-	}}
+	client := newFakeClient(map[string][][]searchHit{
+		"logs-*": {
+			{hit("logs-1", "a", "2026-06-17T10:00:00.000Z"), hit("logs-1", "b", "2026-06-17T10:00:01.000Z")},
+			{hit("logs-1", "c", "2026-06-17T10:00:02.000Z")},
+		},
+	})
 	sink := new(consumertest.LogsSink)
 	store := newMemStorage()
 	r := newTestReceiver(t, client, sink, store)
@@ -90,32 +113,33 @@ func TestPollOncePaginatesAndCheckpoints(t *testing.T) {
 	// 3 records consumed across two pages; third page is short so polling stops.
 	assert.Equal(t, 3, sink.LogRecordCount())
 
-	// cursor advanced to the last document and was persisted.
-	assert.Equal(t, []any{"2026-06-17T10:00:02.000Z", "c"}, r.cursor)
-	persisted, err := newCursorPersister(store).Load(context.Background())
+	// cursor advanced to the last document and was persisted under the index key.
+	assert.Equal(t, []any{"2026-06-17T10:00:02.000Z", "c"}, r.cursors["logs-*"])
+	persisted, err := newCursorPersister(store).Load(context.Background(), "logs-*")
 	require.NoError(t, err)
 	assert.Equal(t, []any{"2026-06-17T10:00:02.000Z", "c"}, persisted)
 
 	// second request must carry search_after from the first page's last hit.
-	require.Len(t, client.calls, 2)
-	assert.Nil(t, client.calls[0].SearchAfter)
-	assert.Equal(t, []any{"2026-06-17T10:00:01.000Z", "b"}, client.calls[1].SearchAfter)
+	calls := client.callsFor("logs-*")
+	require.Len(t, calls, 2)
+	assert.Nil(t, calls[0].SearchAfter)
+	assert.Equal(t, []any{"2026-06-17T10:00:01.000Z", "b"}, calls[1].SearchAfter)
 }
 
 func TestPollOnceEmpty(t *testing.T) {
-	client := &fakeClient{pages: [][]searchHit{{}}}
+	client := newFakeClient(map[string][][]searchHit{"logs-*": {{}}})
 	sink := new(consumertest.LogsSink)
 	r := newTestReceiver(t, client, sink, newMemStorage())
 
 	r.pollOnce(context.Background())
 	assert.Equal(t, 0, sink.LogRecordCount())
-	assert.Nil(t, r.cursor)
+	assert.Empty(t, r.cursors)
 }
 
 func TestPollOnceConsumerError(t *testing.T) {
-	client := &fakeClient{pages: [][]searchHit{
-		{hit("logs-1", "a", "2026-06-17T10:00:00.000Z"), hit("logs-1", "b", "2026-06-17T10:00:01.000Z")},
-	}}
+	client := newFakeClient(map[string][][]searchHit{
+		"logs-*": {{hit("logs-1", "a", "2026-06-17T10:00:00.000Z"), hit("logs-1", "b", "2026-06-17T10:00:01.000Z")}},
+	})
 	sink := consumertest.NewErr(errors.New("downstream boom"))
 	store := newMemStorage()
 	r := newTestReceiver(t, client, sink, store)
@@ -123,17 +147,17 @@ func TestPollOnceConsumerError(t *testing.T) {
 	r.pollOnce(context.Background())
 
 	// cursor must NOT advance when the consumer rejects the batch.
-	assert.Nil(t, r.cursor)
-	_, ok := store.data[cursorStorageKey]
+	assert.Empty(t, r.cursors)
+	_, ok := store.data[cursorKey("logs-*")]
 	assert.False(t, ok)
 }
 
 func TestStartResumesFromPersistedCursor(t *testing.T) {
 	store := newMemStorage()
-	// Pre-seed a persisted cursor.
-	require.NoError(t, newCursorPersister(store).Save(context.Background(), []any{"2026-06-17T09:59:59.000Z", "z"}))
+	// Pre-seed a persisted cursor for the configured index.
+	require.NoError(t, newCursorPersister(store).Save(context.Background(), "logs-*", []any{"2026-06-17T09:59:59.000Z", "z"}))
 
-	client := &fakeClient{pages: [][]searchHit{{}}}
+	client := newFakeClient(map[string][][]searchHit{"logs-*": {{}}})
 	sink := new(consumertest.LogsSink)
 	cfg := validConfig()
 	cfg.InitialDelay = 0
@@ -143,13 +167,44 @@ func TestStartResumesFromPersistedCursor(t *testing.T) {
 	r.persister = newCursorPersister(store)
 
 	// Mimic the cursor-load portion of Start without a real host/extension.
-	cursor, err := r.persister.Load(context.Background())
+	cursor, err := r.persister.Load(context.Background(), "logs-*")
 	require.NoError(t, err)
-	r.cursor = cursor
+	r.cursors["logs-*"] = cursor
 
 	r.pollOnce(context.Background())
-	require.Len(t, client.calls, 1)
-	assert.Equal(t, []any{"2026-06-17T09:59:59.000Z", "z"}, client.calls[0].SearchAfter)
+	calls := client.callsFor("logs-*")
+	require.Len(t, calls, 1)
+	assert.Equal(t, []any{"2026-06-17T09:59:59.000Z", "z"}, calls[0].SearchAfter)
+}
+
+func TestPollOncePerIndexCursorsAreIndependent(t *testing.T) {
+	client := newFakeClient(map[string][][]searchHit{
+		"logs-a": {{hit("logs-a", "a1", "2026-06-17T10:00:00.000Z")}},
+		"logs-b": {{hit("logs-b", "b1", "2026-06-17T11:00:00.000Z"), hit("logs-b", "b2", "2026-06-17T11:00:01.000Z")}},
+	})
+	sink := new(consumertest.LogsSink)
+	store := newMemStorage()
+	cfg := validConfig()
+	cfg.PageSize = 10
+	cfg.Indices = []string{"logs-a", "logs-b"}
+	r := newLogsReceiver(receivertest.NewNopSettings(metadata.Type), cfg, sink)
+	r.client = client
+	r.persister = newCursorPersister(store)
+
+	r.pollOnce(context.Background())
+
+	// Each index advanced to its own last document, checkpointed under its own key.
+	assert.Equal(t, []any{"2026-06-17T10:00:00.000Z", "a1"}, r.cursors["logs-a"])
+	assert.Equal(t, []any{"2026-06-17T11:00:01.000Z", "b2"}, r.cursors["logs-b"])
+
+	a, err := newCursorPersister(store).Load(context.Background(), "logs-a")
+	require.NoError(t, err)
+	assert.Equal(t, []any{"2026-06-17T10:00:00.000Z", "a1"}, a)
+	b, err := newCursorPersister(store).Load(context.Background(), "logs-b")
+	require.NoError(t, err)
+	assert.Equal(t, []any{"2026-06-17T11:00:01.000Z", "b2"}, b)
+
+	assert.Equal(t, 3, sink.LogRecordCount())
 }
 
 func TestConvertHits(t *testing.T) {

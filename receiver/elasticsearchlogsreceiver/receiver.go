@@ -35,8 +35,9 @@ type logsReceiver struct {
 	client    esLogsClient
 	persister *cursorPersister
 
-	// cursor is the search_after value from the last consumed document.
-	cursor []any
+	// cursors holds the per-index search_after value from the last consumed document of each index
+	// pattern, so every index is checkpointed and paginated independently.
+	cursors map[string][]any
 	// lowerBound is the inclusive start time applied on a fresh start; the zero value means no bound.
 	lowerBound time.Time
 
@@ -50,6 +51,7 @@ func newLogsReceiver(settings receiver.Settings, cfg *Config, consumer consumer.
 		settings: settings,
 		consumer: consumer,
 		logger:   settings.Logger,
+		cursors:  make(map[string][]any, len(cfg.Indices)),
 	}
 }
 
@@ -66,15 +68,21 @@ func (r *logsReceiver) Start(ctx context.Context, host component.Host) error {
 	}
 	r.persister = newCursorPersister(storageClient)
 
-	cursor, err := r.persister.Load(ctx)
-	if err != nil {
-		return err
+	// Load each index pattern's cursor independently so indexes resume where they each left off.
+	for _, index := range r.cfg.Indices {
+		cursor, err := r.persister.Load(ctx, index)
+		if err != nil {
+			return err
+		}
+		if cursor != nil {
+			r.cursors[index] = cursor
+			r.logger.Info("resuming from persisted cursor",
+				zap.String("index", index), zap.Any("search_after", cursor))
+		}
 	}
-	if cursor != nil {
-		r.cursor = cursor
-		r.logger.Info("resuming from persisted cursor", zap.Any("search_after", cursor))
-	} else if r.cfg.StartAt == startAtEnd {
-		// On a fresh start, only read documents at or after now - initial_lookback.
+	if r.cfg.StartAt == startAtEnd {
+		// On a fresh start, indexes without a cursor only read documents at or after
+		// now - initial_lookback. buildQuery applies this per index.
 		r.lowerBound = time.Now().Add(-r.cfg.InitialLookback)
 	}
 
@@ -132,8 +140,20 @@ func (r *logsReceiver) run(ctx context.Context) {
 	}
 }
 
-// pollOnce runs a single search cycle, paginating with search_after until the index is exhausted.
+// pollOnce runs a single search cycle, polling each configured index pattern independently.
 func (r *logsReceiver) pollOnce(ctx context.Context) {
+	for _, index := range r.cfg.Indices {
+		if ctx.Err() != nil {
+			return
+		}
+		r.pollIndex(ctx, index)
+	}
+}
+
+// pollIndex paginates one index pattern with search_after until it is exhausted, checkpointing the
+// cursor for that index after each page. An error reading or consuming one index does not affect the
+// others; the next poll retries from that index's last persisted cursor.
+func (r *logsReceiver) pollIndex(ctx context.Context, index string) {
 	for {
 		if ctx.Err() != nil {
 			return
@@ -141,14 +161,14 @@ func (r *logsReceiver) pollOnce(ctx context.Context) {
 
 		req := searchRequest{
 			Size:        r.cfg.PageSize,
-			Query:       r.buildQuery(),
+			Query:       r.buildQuery(index),
 			Sort:        r.cfg.Sort,
-			SearchAfter: r.cursor,
+			SearchAfter: r.cursors[index],
 		}
 
-		resp, err := r.client.Search(ctx, req)
+		resp, err := r.client.Search(ctx, index, req)
 		if err != nil {
-			r.logger.Error("failed to query Elasticsearch", zap.Error(err))
+			r.logger.Error("failed to query Elasticsearch", zap.String("index", index), zap.Error(err))
 			return
 		}
 
@@ -159,23 +179,27 @@ func (r *logsReceiver) pollOnce(ctx context.Context) {
 
 		logs, nextCursor := r.convertHits(hits)
 		if err := r.consumer.ConsumeLogs(ctx, logs); err != nil {
-			r.logger.Error("failed to consume logs; will retry from last cursor", zap.Error(err))
+			r.logger.Error("failed to consume logs; will retry from last cursor",
+				zap.String("index", index), zap.Error(err))
 			return
 		}
 
 		if len(nextCursor) == 0 {
-			r.logger.Error("documents are missing sort values; cannot paginate with search_after, check the 'sort' configuration")
+			r.logger.Error("documents are missing sort values; cannot paginate with search_after, check the 'sort' configuration",
+				zap.String("index", index))
 			return
 		}
 
-		r.cursor = nextCursor
-		if err := r.persister.Save(ctx, r.cursor); err != nil {
-			r.logger.Warn("failed to persist cursor; progress may be lost on restart", zap.Error(err))
+		r.cursors[index] = nextCursor
+		if err := r.persister.Save(ctx, index, nextCursor); err != nil {
+			r.logger.Warn("failed to persist cursor; progress may be lost on restart",
+				zap.String("index", index), zap.Error(err))
 		}
 
 		r.logger.Debug("emitted page of logs",
+			zap.String("index", index),
 			zap.Int("count", len(hits)),
-			zap.Any("cursor", r.cursor))
+			zap.Any("cursor", nextCursor))
 
 		// A short page means we have caught up; wait for the next tick.
 		if len(hits) < r.cfg.PageSize {
@@ -196,11 +220,11 @@ func (r *logsReceiver) hasDescendingSort() bool {
 	return false
 }
 
-// buildQuery assembles the Elasticsearch query. Once a cursor exists, search_after carries the
-// position so only the user-provided filter is sent; on a fresh start the configured lower time
-// bound is ANDed with the user filter.
-func (r *logsReceiver) buildQuery() map[string]any {
-	if r.cursor != nil || r.lowerBound.IsZero() {
+// buildQuery assembles the Elasticsearch query for the given index. Once that index has a cursor,
+// search_after carries the position so only the user-provided filter is sent; on a fresh start the
+// configured lower time bound is ANDed with the user filter.
+func (r *logsReceiver) buildQuery(index string) map[string]any {
+	if r.cursors[index] != nil || r.lowerBound.IsZero() {
 		return r.cfg.Query
 	}
 

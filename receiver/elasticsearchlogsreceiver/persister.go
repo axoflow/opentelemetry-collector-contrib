@@ -13,8 +13,11 @@ import (
 	"go.opentelemetry.io/collector/extension/xextension/storage"
 )
 
-// cursorStorageKey is the key under which the search_after cursor is persisted.
-const cursorStorageKey = "search_after_cursor"
+// cursorKeyPrefix is prepended to the index name to form the storage key under which that index's
+// search_after cursor is persisted. Each index pattern is checkpointed independently.
+const cursorKeyPrefix = "search_after_cursor::"
+
+func cursorKey(index string) string { return cursorKeyPrefix + index }
 
 // getStorageClient resolves the configured storage extension into a storage.Client. When no storage
 // extension is configured a no-op client is returned, so the cursor is kept in memory only.
@@ -48,11 +51,11 @@ func newCursorPersister(client storage.Client) *cursorPersister {
 	return &cursorPersister{client: client}
 }
 
-// Load returns the persisted cursor, or nil if none has been stored yet.
-func (p *cursorPersister) Load(ctx context.Context) ([]any, error) {
-	data, err := p.client.Get(ctx, cursorStorageKey)
+// Load returns the persisted cursor for the given index, or nil if none has been stored yet.
+func (p *cursorPersister) Load(ctx context.Context, index string) ([]any, error) {
+	data, err := p.client.Get(ctx, cursorKey(index))
 	if err != nil {
-		return nil, fmt.Errorf("failed to retrieve cursor: %w", err)
+		return nil, fmt.Errorf("failed to retrieve cursor for index %q: %w", index, err)
 	}
 	if len(data) == 0 {
 		return nil, nil
@@ -60,19 +63,19 @@ func (p *cursorPersister) Load(ctx context.Context) ([]any, error) {
 
 	var cursor []any
 	if err := json.Unmarshal(data, &cursor); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal cursor: %w", err)
+		return nil, fmt.Errorf("failed to unmarshal cursor for index %q: %w", index, err)
 	}
 	return cursor, nil
 }
 
-// Save persists the cursor.
-func (p *cursorPersister) Save(ctx context.Context, cursor []any) error {
+// Save persists the cursor for the given index.
+func (p *cursorPersister) Save(ctx context.Context, index string, cursor []any) error {
 	data, err := json.Marshal(cursor)
 	if err != nil {
-		return fmt.Errorf("failed to marshal cursor: %w", err)
+		return fmt.Errorf("failed to marshal cursor for index %q: %w", index, err)
 	}
-	if err := p.client.Set(ctx, cursorStorageKey, data); err != nil {
-		return fmt.Errorf("failed to store cursor: %w", err)
+	if err := p.client.Set(ctx, cursorKey(index), data); err != nil {
+		return fmt.Errorf("failed to store cursor for index %q: %w", index, err)
 	}
 	return nil
 }

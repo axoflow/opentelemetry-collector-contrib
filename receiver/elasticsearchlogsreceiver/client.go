@@ -50,14 +50,14 @@ type searchHit struct {
 
 // esLogsClient queries Elasticsearch for log documents.
 type esLogsClient interface {
-	// Search issues a single _search request and returns the matching page of hits.
-	Search(ctx context.Context, req searchRequest) (*searchResponse, error)
+	// Search issues a single _search request against the given index (or index pattern) and returns
+	// the matching page of hits.
+	Search(ctx context.Context, index string, req searchRequest) (*searchResponse, error)
 }
 
 type defaultESLogsClient struct {
 	client     *http.Client
 	endpoint   *url.URL
-	searchPath string
 	authHeader string
 	logger     *zap.Logger
 }
@@ -87,19 +87,18 @@ func newESLogsClient(ctx context.Context, settings component.TelemetrySettings, 
 	return &defaultESLogsClient{
 		client:     httpClient,
 		endpoint:   endpoint,
-		searchPath: strings.Join(cfg.Indices, ",") + "/_search",
 		authHeader: authHeader,
 		logger:     settings.Logger,
 	}, nil
 }
 
-func (c *defaultESLogsClient) Search(ctx context.Context, req searchRequest) (*searchResponse, error) {
+func (c *defaultESLogsClient) Search(ctx context.Context, index string, req searchRequest) (*searchResponse, error) {
 	body, err := json.Marshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal search request: %w", err)
 	}
 
-	respBody, err := c.doRequest(ctx, c.searchPath, body)
+	respBody, err := c.doRequest(ctx, index+"/_search", body)
 	if err != nil {
 		return nil, err
 	}

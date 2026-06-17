@@ -47,7 +47,7 @@ func TestSearchRequestAndParsing(t *testing.T) {
 	client, err := newESLogsClient(context.Background(), componenttest.NewNopTelemetrySettings(), cfg, componenttest.NewNopHost())
 	require.NoError(t, err)
 
-	resp, err := client.Search(context.Background(), searchRequest{
+	resp, err := client.Search(context.Background(), "logs-*", searchRequest{
 		Size:        cfg.PageSize,
 		Sort:        cfg.Sort,
 		SearchAfter: []any{"2026-06-17T10:15:23.123Z", "abc123"},
@@ -85,7 +85,7 @@ func TestSearchAPIKeyAuth(t *testing.T) {
 	client, err := newESLogsClient(context.Background(), componenttest.NewNopTelemetrySettings(), cfg, componenttest.NewNopHost())
 	require.NoError(t, err)
 
-	_, err = client.Search(context.Background(), searchRequest{Size: 10, Sort: cfg.Sort})
+	_, err = client.Search(context.Background(), "logs-*", searchRequest{Size: 10, Sort: cfg.Sort})
 	require.NoError(t, err)
 	assert.Equal(t, "ApiKey mykey==", gotAuth)
 }
@@ -102,6 +102,6 @@ func TestSearchErrorStatus(t *testing.T) {
 	client, err := newESLogsClient(context.Background(), componenttest.NewNopTelemetrySettings(), cfg, componenttest.NewNopHost())
 	require.NoError(t, err)
 
-	_, err = client.Search(context.Background(), searchRequest{Size: 10, Sort: cfg.Sort})
+	_, err = client.Search(context.Background(), "logs-*", searchRequest{Size: 10, Sort: cfg.Sort})
 	assert.ErrorIs(t, err, errUnauthenticated)
 }
