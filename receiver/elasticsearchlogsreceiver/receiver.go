@@ -78,6 +78,15 @@ func (r *logsReceiver) Start(ctx context.Context, host component.Host) error {
 		r.lowerBound = time.Now().Add(-r.cfg.InitialLookback)
 	}
 
+	// A descending sort pages from newest to oldest, so once history is drained the cursor sits at
+	// the oldest document and documents ingested later (which sort higher) fall before the cursor and
+	// are never retrieved. Ascending sort is required to continuously tail newly ingested logs.
+	if r.hasDescendingSort() {
+		r.logger.Warn("'sort' uses descending order; the receiver will not pick up documents ingested " +
+			"after it catches up. Use ascending order on a monotonically increasing field (e.g. the " +
+			"timestamp plus a unique tiebreaker) to continuously tail new logs.")
+	}
+
 	pollCtx, cancel := context.WithCancel(context.Background())
 	r.cancel = cancel
 	r.wg.Add(1)
@@ -164,11 +173,27 @@ func (r *logsReceiver) pollOnce(ctx context.Context) {
 			r.logger.Warn("failed to persist cursor; progress may be lost on restart", zap.Error(err))
 		}
 
+		r.logger.Debug("emitted page of logs",
+			zap.Int("count", len(hits)),
+			zap.Any("cursor", r.cursor))
+
 		// A short page means we have caught up; wait for the next tick.
 		if len(hits) < r.cfg.PageSize {
 			return
 		}
 	}
+}
+
+// hasDescendingSort reports whether any configured sort field uses descending order.
+func (r *logsReceiver) hasDescendingSort() bool {
+	for _, s := range r.cfg.Sort {
+		for _, order := range s {
+			if order == "desc" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // buildQuery assembles the Elasticsearch query. Once a cursor exists, search_after carries the
