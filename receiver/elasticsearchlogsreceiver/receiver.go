@@ -154,13 +154,26 @@ func (r *logsReceiver) pollOnce(ctx context.Context) {
 // cursor for that index after each page. An error reading or consuming one index does not affect the
 // others; the next poll retries from that index's last persisted cursor.
 func (r *logsReceiver) pollIndex(ctx context.Context, index string) {
+	emitted := 0
 	for {
 		if ctx.Err() != nil {
 			return
 		}
 
+		// Cap the requested page size so a cycle never fetches more than batch_limit documents.
+		size := r.cfg.PageSize
+		if r.cfg.BatchLimit > 0 {
+			remaining := r.cfg.BatchLimit - emitted
+			if remaining <= 0 {
+				return
+			}
+			if remaining < size {
+				size = remaining
+			}
+		}
+
 		req := searchRequest{
-			Size:        r.cfg.PageSize,
+			Size:        size,
 			Query:       r.buildQuery(index),
 			Sort:        r.cfg.Sort,
 			SearchAfter: r.cursors[index],
@@ -191,6 +204,7 @@ func (r *logsReceiver) pollIndex(ctx context.Context, index string) {
 		}
 
 		r.cursors[index] = nextCursor
+		emitted += len(hits)
 		if err := r.persister.Save(ctx, index, nextCursor); err != nil {
 			r.logger.Warn("failed to persist cursor; progress may be lost on restart",
 				zap.String("index", index), zap.Error(err))
@@ -201,8 +215,15 @@ func (r *logsReceiver) pollIndex(ctx context.Context, index string) {
 			zap.Int("count", len(hits)),
 			zap.Any("cursor", nextCursor))
 
-		// A short page means we have caught up; wait for the next tick.
-		if len(hits) < r.cfg.PageSize {
+		// A short page (fewer hits than requested) means we have caught up; wait for the next tick.
+		if len(hits) < size {
+			return
+		}
+
+		// Reached the per-cycle cap; resume from the persisted cursor on the next poll.
+		if r.cfg.BatchLimit > 0 && emitted >= r.cfg.BatchLimit {
+			r.logger.Debug("reached batch_limit; pausing index until next poll",
+				zap.String("index", index), zap.Int("emitted", emitted))
 			return
 		}
 	}
