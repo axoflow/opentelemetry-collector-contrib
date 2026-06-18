@@ -6,6 +6,7 @@ package elasticsearchlogsreceiver
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -175,6 +176,68 @@ func TestStartResumesFromPersistedCursor(t *testing.T) {
 	calls := client.callsFor("logs-*")
 	require.Len(t, calls, 1)
 	assert.Equal(t, []any{"2026-06-17T09:59:59.000Z", "z"}, calls[0].SearchAfter)
+}
+
+// listClient models Elasticsearch: it serves up to req.Size hits after the search_after cursor from a
+// flat ordered list, so it honors the requested page size (unlike fakeClient's fixed pages).
+type listClient struct {
+	docs  []searchHit
+	calls []searchCall
+}
+
+func (c *listClient) Search(_ context.Context, index string, req searchRequest) (*searchResponse, error) {
+	c.calls = append(c.calls, searchCall{index: index, req: req})
+	start := 0
+	if req.SearchAfter != nil {
+		for i, d := range c.docs {
+			if reflect.DeepEqual(d.Sort, req.SearchAfter) {
+				start = i + 1
+				break
+			}
+		}
+	}
+	end := start + req.Size
+	if end > len(c.docs) {
+		end = len(c.docs)
+	}
+	resp := &searchResponse{}
+	resp.Hits.Hits = c.docs[start:end]
+	return resp, nil
+}
+
+func TestPollOnceBatchLimit(t *testing.T) {
+	docs := make([]searchHit, 5)
+	for i := range docs {
+		ts := "2026-06-17T10:00:0" + string(rune('0'+i)) + ".000Z"
+		docs[i] = hit("logs-1", string(rune('a'+i)), ts)
+	}
+	client := &listClient{docs: docs}
+	sink := new(consumertest.LogsSink)
+	store := newMemStorage()
+	cfg := validConfig()
+	cfg.Indices = []string{"logs-1"}
+	cfg.PageSize = 2
+	cfg.BatchLimit = 3
+	r := newLogsReceiver(receivertest.NewNopSettings(metadata.Type), cfg, sink)
+	r.client = client
+	r.persister = newCursorPersister(store)
+
+	// First cycle: fetch at most batch_limit (3) documents, never overshooting.
+	r.pollOnce(context.Background())
+	assert.Equal(t, 3, sink.LogRecordCount())
+	for _, c := range client.calls {
+		assert.LessOrEqual(t, c.req.Size, 2, "request size must never exceed page_size")
+	}
+	// Requested sizes were capped by remaining budget: 2 then 1.
+	require.Len(t, client.calls, 2)
+	assert.Equal(t, 2, client.calls[0].req.Size)
+	assert.Equal(t, 1, client.calls[1].req.Size)
+	assert.Equal(t, docs[2].Sort, r.cursors["logs-1"])
+
+	// Second cycle: picks up where it left off and drains the remaining 2.
+	r.pollOnce(context.Background())
+	assert.Equal(t, 5, sink.LogRecordCount())
+	assert.Equal(t, docs[4].Sort, r.cursors["logs-1"])
 }
 
 func TestPollOncePerIndexCursorsAreIndependent(t *testing.T) {

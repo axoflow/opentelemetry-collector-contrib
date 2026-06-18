@@ -56,6 +56,7 @@ data.
 | `timestamp_field` | `@timestamp` | Document field used as the time cursor and for the initial range filter. |
 | `sort` | _(required)_ | Stable sort. Each entry maps one field to `asc`/`desc`; at least one field is required, and the last entry should be unique per document. |
 | `page_size` | `1000` | Number of documents per `_search` request (the query `size`). |
+| `batch_limit` | `0` | Maximum documents fetched per index per poll cycle; the receiver stops paginating once reached and resumes from the cursor on the next poll. `0` means no limit (drain each index fully every cycle). |
 | `poll_interval` | `30s` | How often a new search cycle starts. |
 | `initial_delay` | `1s` | Delay before the first poll after startup. |
 | `start_at` | `end` | Where to begin on a fresh start (no checkpoint): `beginning` reads all history, `end` reads only recent documents. |

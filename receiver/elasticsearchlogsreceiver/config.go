@@ -30,6 +30,7 @@ var (
 	errSortEmpty            = errors.New("'sort' must contain at least one field; for reliable search_after pagination the last entry should be a field that is unique per document")
 	errSortBadOrder         = errors.New("each 'sort' entry must map exactly one field to either 'asc' or 'desc'")
 	errBadPageSize          = errors.New("'page_size' must be greater than 0")
+	errBadBatchLimit        = errors.New("'batch_limit' must not be negative (0 means no limit)")
 	errBadPollInterval      = errors.New("'poll_interval' must be greater than 0")
 	errBadStartAt           = fmt.Errorf("'start_at' must be one of %q or %q", startAtBeginning, startAtEnd)
 )
@@ -62,6 +63,10 @@ type Config struct {
 	Sort []map[string]string `mapstructure:"sort"`
 	// PageSize is the number of documents requested per _search call (the query "size").
 	PageSize int `mapstructure:"page_size"`
+	// BatchLimit caps the number of documents fetched per index per poll cycle. Once an index has
+	// emitted this many documents in a cycle, the receiver stops paginating it and resumes from the
+	// persisted cursor on the next poll. Zero means no limit (drain each index fully every cycle).
+	BatchLimit int `mapstructure:"batch_limit"`
 
 	// PollInterval is how often a new search cycle is started.
 	PollInterval time.Duration `mapstructure:"poll_interval"`
@@ -127,6 +132,10 @@ func (cfg *Config) Validate() error {
 
 	if cfg.PageSize <= 0 {
 		errs = append(errs, errBadPageSize)
+	}
+
+	if cfg.BatchLimit < 0 {
+		errs = append(errs, errBadBatchLimit)
 	}
 
 	if cfg.PollInterval <= 0 {

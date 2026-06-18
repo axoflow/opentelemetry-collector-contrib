@@ -79,6 +79,15 @@ func TestValidate(t *testing.T) {
 			expectedErr: errBadPageSize,
 		},
 		{
+			desc:        "negative batch limit",
+			mutate:      func(c *Config) { c.BatchLimit = -1 },
+			expectedErr: errBadBatchLimit,
+		},
+		{
+			desc:   "zero batch limit is allowed",
+			mutate: func(c *Config) { c.BatchLimit = 0 },
+		},
+		{
 			desc:        "non positive poll interval",
 			mutate:      func(c *Config) { c.PollInterval = 0 },
 			expectedErr: errBadPollInterval,
@@ -136,6 +145,7 @@ func TestLoadConfig(t *testing.T) {
 	expected.TimestampField = "@timestamp"
 	expected.Sort = []map[string]string{{"@timestamp": "asc"}, {"event.id": "asc"}}
 	expected.PageSize = 500
+	expected.BatchLimit = 2000
 	expected.PollInterval = 15 * time.Second
 	expected.InitialDelay = time.Second
 	expected.StartAt = startAtEnd
