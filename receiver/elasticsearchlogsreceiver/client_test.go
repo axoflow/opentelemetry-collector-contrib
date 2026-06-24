@@ -4,7 +4,6 @@
 package elasticsearchlogsreceiver
 
 import (
-	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -25,7 +24,7 @@ func TestSearchRequestAndParsing(t *testing.T) {
 		gotAuth = r.Header.Get("Authorization")
 		gotContentType = r.Header.Get("Content-Type")
 		body, _ := io.ReadAll(r.Body)
-		require.NoError(t, json.Unmarshal(body, &gotBody))
+		assert.NoError(t, json.Unmarshal(body, &gotBody))
 
 		_, _ = w.Write([]byte(`{
 			"hits": {
@@ -44,10 +43,10 @@ func TestSearchRequestAndParsing(t *testing.T) {
 	cfg.Password = "pass"
 	cfg.PageSize = 1000
 
-	client, err := newESLogsClient(context.Background(), componenttest.NewNopTelemetrySettings(), cfg, componenttest.NewNopHost())
+	client, err := newESLogsClient(t.Context(), componenttest.NewNopTelemetrySettings(), cfg, componenttest.NewNopHost())
 	require.NoError(t, err)
 
-	resp, err := client.Search(context.Background(), "logs-*", searchRequest{
+	resp, err := client.Search(t.Context(), "logs-*", searchRequest{
 		Size:        cfg.PageSize,
 		Sort:        cfg.Sort,
 		SearchAfter: []any{"2026-06-17T10:15:23.123Z", "abc123"},
@@ -82,10 +81,10 @@ func TestSearchAPIKeyAuth(t *testing.T) {
 	cfg.Endpoint = srv.URL
 	cfg.APIKey = "mykey=="
 
-	client, err := newESLogsClient(context.Background(), componenttest.NewNopTelemetrySettings(), cfg, componenttest.NewNopHost())
+	client, err := newESLogsClient(t.Context(), componenttest.NewNopTelemetrySettings(), cfg, componenttest.NewNopHost())
 	require.NoError(t, err)
 
-	_, err = client.Search(context.Background(), "logs-*", searchRequest{Size: 10, Sort: cfg.Sort})
+	_, err = client.Search(t.Context(), "logs-*", searchRequest{Size: 10, Sort: cfg.Sort})
 	require.NoError(t, err)
 	assert.Equal(t, "ApiKey mykey==", gotAuth)
 }
@@ -99,9 +98,9 @@ func TestSearchErrorStatus(t *testing.T) {
 	cfg := validConfig()
 	cfg.Endpoint = srv.URL
 
-	client, err := newESLogsClient(context.Background(), componenttest.NewNopTelemetrySettings(), cfg, componenttest.NewNopHost())
+	client, err := newESLogsClient(t.Context(), componenttest.NewNopTelemetrySettings(), cfg, componenttest.NewNopHost())
 	require.NoError(t, err)
 
-	_, err = client.Search(context.Background(), "logs-*", searchRequest{Size: 10, Sort: cfg.Sort})
+	_, err = client.Search(t.Context(), "logs-*", searchRequest{Size: 10, Sort: cfg.Sort})
 	assert.ErrorIs(t, err, errUnauthenticated)
 }
