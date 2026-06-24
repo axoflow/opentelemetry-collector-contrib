@@ -10,8 +10,8 @@ endpoint on a fixed interval and emits the matching documents as logs.
 
 It paginates through results using [`search_after`](https://www.elastic.co/guide/en/elasticsearch/reference/current/paginate-search-results.html#search-after)
 combined with a stable sort, which is more efficient and reliable than deep `from`/`size` paging.
-Each configured index pattern is queried, paginated and checkpointed **independently**, so one slow or
-failing index does not hold up the others. When a
+Each configured index pattern is queried, paginated and checkpointed **independently** by its own
+goroutine, so a slow or failing index does not hold up the others. When a
 [storage extension](https://github.com/open-telemetry/opentelemetry-collector-contrib/tree/main/extension/storage)
 is configured, the receiver persists a per-index `search_after` cursor so that, after a collector
 restart, each index resumes from where it stopped instead of re-reading or skipping documents.
@@ -61,6 +61,13 @@ data.
 | `initial_delay` | `1s` | Delay before the first poll after startup. |
 | `start_at` | `end` | Where to begin on a fresh start (no checkpoint): `beginning` reads all history, `end` reads only recent documents. |
 | `initial_lookback` | `0` | When `start_at: end`, how far back from "now" to begin. `0` means only documents ingested after startup. |
+
+> **Note on `start_at: end`:** the lower time bound is `now - initial_lookback`, captured at startup and
+> applied only on the first poll of each cursorless index. Documents whose `@timestamp` precedes that
+> instant but which are indexed into Elasticsearch *afterwards* — due to indexing lag or clock skew
+> between the collector and Elasticsearch — fall before the bound and are missed. Set `initial_lookback`
+> larger than your worst-case indexing lag plus clock skew to avoid this. Use `start_at: beginning` to
+> read all history with no time bound.
 | `storage` | | ID of a storage extension used to persist the `search_after` cursor across restarts. If unset, the cursor is in-memory only. |
 
 The connection settings (`endpoint`, `tls`, timeouts, etc.) are the standard [confighttp] client
