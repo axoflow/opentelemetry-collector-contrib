@@ -21,6 +21,11 @@ func cursorKey(index string) string { return cursorKeyPrefix + index }
 
 // getStorageClient resolves the configured storage extension into a storage.Client. When no storage
 // extension is configured a no-op client is returned, so the cursor is kept in memory only.
+//
+// This mirrors pkg/stanza/adapter.GetStorageClient. It is intentionally kept local rather than
+// imported: that helper lives in the stanza adapter package, importing which pulls in the entire
+// stanza operator framework (and its large dependency tree) for a few lines of code. Other core
+// receivers (k8seventsreceiver, k8sobjectsreceiver) keep their own copy for the same reason.
 func getStorageClient(ctx context.Context, host component.Host, storageID *component.ID, componentID component.ID) (storage.Client, error) {
 	if storageID == nil {
 		return storage.NewNopClient(), nil

@@ -98,7 +98,17 @@ func hit(index, id, ts string) searchHit {
 	}
 }
 
-func TestPollOncePaginatesAndCheckpoints(t *testing.T) {
+// hitNoSort is a hit with no sort values, simulating a misconfigured sort field.
+func hitNoSort(index, id string) searchHit {
+	return searchHit{
+		Index:  index,
+		ID:     id,
+		Source: map[string]any{"message": "m-" + id},
+		Sort:   nil,
+	}
+}
+
+func TestPollIndexPaginatesAndCheckpoints(t *testing.T) {
 	client := newFakeClient(map[string][][]searchHit{
 		"logs-*": {
 			{hit("logs-1", "a", "2026-06-17T10:00:00.000Z"), hit("logs-1", "b", "2026-06-17T10:00:01.000Z")},
@@ -109,13 +119,13 @@ func TestPollOncePaginatesAndCheckpoints(t *testing.T) {
 	store := newMemStorage()
 	r := newTestReceiver(t, client, sink, store)
 
-	r.pollOnce(context.Background())
+	cursor := r.pollIndex(context.Background(), "logs-*", nil)
 
 	// 3 records consumed across two pages; third page is short so polling stops.
 	assert.Equal(t, 3, sink.LogRecordCount())
 
 	// cursor advanced to the last document and was persisted under the index key.
-	assert.Equal(t, []any{"2026-06-17T10:00:02.000Z", "c"}, r.cursors["logs-*"])
+	assert.Equal(t, []any{"2026-06-17T10:00:02.000Z", "c"}, cursor)
 	persisted, err := newCursorPersister(store).Load(context.Background(), "logs-*")
 	require.NoError(t, err)
 	assert.Equal(t, []any{"2026-06-17T10:00:02.000Z", "c"}, persisted)
@@ -127,17 +137,17 @@ func TestPollOncePaginatesAndCheckpoints(t *testing.T) {
 	assert.Equal(t, []any{"2026-06-17T10:00:01.000Z", "b"}, calls[1].SearchAfter)
 }
 
-func TestPollOnceEmpty(t *testing.T) {
+func TestPollIndexEmpty(t *testing.T) {
 	client := newFakeClient(map[string][][]searchHit{"logs-*": {{}}})
 	sink := new(consumertest.LogsSink)
 	r := newTestReceiver(t, client, sink, newMemStorage())
 
-	r.pollOnce(context.Background())
+	cursor := r.pollIndex(context.Background(), "logs-*", nil)
 	assert.Equal(t, 0, sink.LogRecordCount())
-	assert.Empty(t, r.cursors)
+	assert.Nil(t, cursor)
 }
 
-func TestPollOnceConsumerError(t *testing.T) {
+func TestPollIndexConsumerError(t *testing.T) {
 	client := newFakeClient(map[string][][]searchHit{
 		"logs-*": {{hit("logs-1", "a", "2026-06-17T10:00:00.000Z"), hit("logs-1", "b", "2026-06-17T10:00:01.000Z")}},
 	})
@@ -145,37 +155,87 @@ func TestPollOnceConsumerError(t *testing.T) {
 	store := newMemStorage()
 	r := newTestReceiver(t, client, sink, store)
 
-	r.pollOnce(context.Background())
+	cursor := r.pollIndex(context.Background(), "logs-*", nil)
 
 	// cursor must NOT advance when the consumer rejects the batch.
-	assert.Empty(t, r.cursors)
+	assert.Nil(t, cursor)
 	_, ok := store.data[cursorKey("logs-*")]
 	assert.False(t, ok)
 }
 
-func TestStartResumesFromPersistedCursor(t *testing.T) {
-	store := newMemStorage()
-	// Pre-seed a persisted cursor for the configured index.
-	require.NoError(t, newCursorPersister(store).Save(context.Background(), "logs-*", []any{"2026-06-17T09:59:59.000Z", "z"}))
-
+func TestPollIndexResumesFromCursor(t *testing.T) {
 	client := newFakeClient(map[string][][]searchHit{"logs-*": {{}}})
 	sink := new(consumertest.LogsSink)
-	cfg := validConfig()
-	cfg.InitialDelay = 0
-	cfg.PollInterval = time.Hour // avoid a second tick during the test
-	r := newLogsReceiver(receivertest.NewNopSettings(metadata.Type), cfg, sink)
-	r.client = client
-	r.persister = newCursorPersister(store)
+	r := newTestReceiver(t, client, sink, newMemStorage())
 
-	// Mimic the cursor-load portion of Start without a real host/extension.
-	cursor, err := r.persister.Load(context.Background(), "logs-*")
-	require.NoError(t, err)
-	r.cursors["logs-*"] = cursor
+	start := []any{"2026-06-17T09:59:59.000Z", "z"}
+	r.pollIndex(context.Background(), "logs-*", start)
 
-	r.pollOnce(context.Background())
 	calls := client.callsFor("logs-*")
 	require.Len(t, calls, 1)
-	assert.Equal(t, []any{"2026-06-17T09:59:59.000Z", "z"}, calls[0].SearchAfter)
+	assert.Equal(t, start, calls[0].SearchAfter)
+}
+
+// A page whose final document has no sort values cannot advance search_after; the page must NOT be
+// delivered (otherwise it would be re-delivered on every poll), and the cursor must stay put.
+func TestPollIndexRefusesPageWithMissingFinalSort(t *testing.T) {
+	client := newFakeClient(map[string][][]searchHit{
+		"logs-*": {{hit("logs-1", "a", "2026-06-17T10:00:00.000Z"), hitNoSort("logs-1", "b")}},
+	})
+	sink := new(consumertest.LogsSink)
+	store := newMemStorage()
+	r := newTestReceiver(t, client, sink, store)
+
+	cursor := r.pollIndex(context.Background(), "logs-*", nil)
+
+	assert.Equal(t, 0, sink.LogRecordCount(), "page with unusable cursor must not be delivered")
+	assert.Nil(t, cursor)
+	_, ok := store.data[cursorKey("logs-*")]
+	assert.False(t, ok)
+}
+
+// The cursor is taken from the actual last hit, even if an earlier hit also had sort values.
+func TestPollIndexUsesLastHitSort(t *testing.T) {
+	client := newFakeClient(map[string][][]searchHit{
+		"logs-*": {{
+			hit("logs-1", "a", "2026-06-17T10:00:00.000Z"),
+			hit("logs-1", "b", "2026-06-17T10:00:01.000Z"),
+		}},
+	})
+	sink := new(consumertest.LogsSink)
+	r := newTestReceiver(t, client, sink, newMemStorage())
+
+	cursor := r.pollIndex(context.Background(), "logs-*", nil)
+	assert.Equal(t, 2, sink.LogRecordCount())
+	assert.Equal(t, []any{"2026-06-17T10:00:01.000Z", "b"}, cursor)
+}
+
+// Mixed restart state: the lower-bound time filter is applied only to indexes that start without a
+// cursor; an index resuming from a cursor sends search_after with no range filter.
+func TestPollIndexAppliesLowerBoundOnlyWithoutCursor(t *testing.T) {
+	client := newFakeClient(map[string][][]searchHit{
+		"fresh":   {{}},
+		"resumed": {{}},
+	})
+	r := newTestReceiver(t, client, new(consumertest.LogsSink), newMemStorage())
+	r.cfg.Query = nil
+	r.lowerBound = time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+
+	r.pollIndex(context.Background(), "fresh", nil)
+	r.pollIndex(context.Background(), "resumed", []any{"2026-06-17T00:00:00.000Z", "x"})
+
+	// fresh index (nil cursor) → query carries a range filter on the timestamp field.
+	freshReq := client.callsFor("fresh")[0]
+	require.NotNil(t, freshReq.Query)
+	filters := freshReq.Query["bool"].(map[string]any)["filter"].([]any)
+	require.Len(t, filters, 1)
+	rng := filters[0].(map[string]any)["range"].(map[string]any)
+	_, hasTS := rng["@timestamp"]
+	assert.True(t, hasTS, "fresh index must filter on the timestamp lower bound")
+
+	// resumed index (non-nil cursor) → no range filter, just the (nil) user query.
+	resumedReq := client.callsFor("resumed")[0]
+	assert.Nil(t, resumedReq.Query, "resumed index must rely on search_after, not the lower bound")
 }
 
 // listClient models Elasticsearch: it serves up to req.Size hits after the search_after cursor from a
@@ -223,7 +283,7 @@ func TestPollOnceBatchLimit(t *testing.T) {
 	r.persister = newCursorPersister(store)
 
 	// First cycle: fetch at most batch_limit (3) documents, never overshooting.
-	r.pollOnce(context.Background())
+	cursor := r.pollIndex(context.Background(), "logs-1", nil)
 	assert.Equal(t, 3, sink.LogRecordCount())
 	for _, c := range client.calls {
 		assert.LessOrEqual(t, c.req.Size, 2, "request size must never exceed page_size")
@@ -232,15 +292,15 @@ func TestPollOnceBatchLimit(t *testing.T) {
 	require.Len(t, client.calls, 2)
 	assert.Equal(t, 2, client.calls[0].req.Size)
 	assert.Equal(t, 1, client.calls[1].req.Size)
-	assert.Equal(t, docs[2].Sort, r.cursors["logs-1"])
+	assert.Equal(t, docs[2].Sort, cursor)
 
 	// Second cycle: picks up where it left off and drains the remaining 2.
-	r.pollOnce(context.Background())
+	cursor = r.pollIndex(context.Background(), "logs-1", cursor)
 	assert.Equal(t, 5, sink.LogRecordCount())
-	assert.Equal(t, docs[4].Sort, r.cursors["logs-1"])
+	assert.Equal(t, docs[4].Sort, cursor)
 }
 
-func TestPollOncePerIndexCursorsAreIndependent(t *testing.T) {
+func TestPollIndexPerIndexCursorsAreIndependent(t *testing.T) {
 	client := newFakeClient(map[string][][]searchHit{
 		"logs-a": {{hit("logs-a", "a1", "2026-06-17T10:00:00.000Z")}},
 		"logs-b": {{hit("logs-b", "b1", "2026-06-17T11:00:00.000Z"), hit("logs-b", "b2", "2026-06-17T11:00:01.000Z")}},
@@ -254,11 +314,12 @@ func TestPollOncePerIndexCursorsAreIndependent(t *testing.T) {
 	r.client = client
 	r.persister = newCursorPersister(store)
 
-	r.pollOnce(context.Background())
+	// Each index is polled with its own cursor and checkpointed under its own key.
+	ca := r.pollIndex(context.Background(), "logs-a", nil)
+	cb := r.pollIndex(context.Background(), "logs-b", nil)
 
-	// Each index advanced to its own last document, checkpointed under its own key.
-	assert.Equal(t, []any{"2026-06-17T10:00:00.000Z", "a1"}, r.cursors["logs-a"])
-	assert.Equal(t, []any{"2026-06-17T11:00:01.000Z", "b2"}, r.cursors["logs-b"])
+	assert.Equal(t, []any{"2026-06-17T10:00:00.000Z", "a1"}, ca)
+	assert.Equal(t, []any{"2026-06-17T11:00:01.000Z", "b2"}, cb)
 
 	a, err := newCursorPersister(store).Load(context.Background(), "logs-a")
 	require.NoError(t, err)
@@ -274,7 +335,7 @@ func TestConvertHits(t *testing.T) {
 	cfg := validConfig()
 	r := newLogsReceiver(receivertest.NewNopSettings(metadata.Type), cfg, consumertest.NewNop())
 
-	logs, lastSort := r.convertHits([]searchHit{
+	logs := r.convertHits([]searchHit{
 		hit("logs-1", "a", "2026-06-17T10:00:00.000Z"),
 		hit("logs-1", "b", "2026-06-17T10:00:01.000Z"),
 	})
@@ -288,8 +349,6 @@ func TestConvertHits(t *testing.T) {
 	assert.Equal(t, "a", idAttr.Str())
 	expectedTS, _ := time.Parse(time.RFC3339Nano, "2026-06-17T10:00:00.000Z")
 	assert.Equal(t, pcommon.NewTimestampFromTime(expectedTS), lr.Timestamp())
-
-	assert.Equal(t, []any{"2026-06-17T10:00:01.000Z", "b"}, lastSort)
 }
 
 func TestHasDescendingSort(t *testing.T) {
