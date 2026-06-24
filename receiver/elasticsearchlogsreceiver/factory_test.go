@@ -4,7 +4,6 @@
 package elasticsearchlogsreceiver
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -32,7 +31,7 @@ func TestCreateLogsReceiver(t *testing.T) {
 	cfg := validConfig()
 
 	r, err := createLogsReceiver(
-		context.Background(),
+		t.Context(),
 		receivertest.NewNopSettings(metadata.Type),
 		cfg,
 		consumertest.NewNop(),
@@ -43,7 +42,7 @@ func TestCreateLogsReceiver(t *testing.T) {
 
 func TestCreateLogsReceiverWrongConfig(t *testing.T) {
 	_, err := createLogsReceiver(
-		context.Background(),
+		t.Context(),
 		receivertest.NewNopSettings(metadata.Type),
 		nil,
 		consumertest.NewNop(),

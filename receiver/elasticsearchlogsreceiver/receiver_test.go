@@ -256,10 +256,7 @@ func (c *listClient) Search(_ context.Context, index string, req searchRequest) 
 			}
 		}
 	}
-	end := start + req.Size
-	if end > len(c.docs) {
-		end = len(c.docs)
-	}
+	end := min(start+req.Size, len(c.docs))
 	resp := &searchResponse{}
 	resp.Hits.Hits = c.docs[start:end]
 	return resp, nil
