@@ -13,10 +13,14 @@ import (
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/receiver"
+	"go.opentelemetry.io/collector/receiver/receiverhelper"
 	"go.uber.org/zap"
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/elasticsearchlogsreceiver/internal/metadata"
 )
+
+// dataFormat is reported in receiver observability metrics.
+const dataFormat = "elasticsearch"
 
 // timestampLayouts are the formats tried, in order, when parsing the configured timestamp field.
 var timestampLayouts = []string{
@@ -34,6 +38,7 @@ type logsReceiver struct {
 
 	client    esLogsClient
 	persister *cursorPersister
+	obsrecv   *receiverhelper.ObsReport
 
 	// cursors holds the per-index search_after value from the last consumed document of each index
 	// pattern, so every index is checkpointed and paginated independently.
@@ -46,12 +51,21 @@ type logsReceiver struct {
 }
 
 func newLogsReceiver(settings receiver.Settings, cfg *Config, consumer consumer.Logs) *logsReceiver {
+	obsrecv, err := receiverhelper.NewObsReport(receiverhelper.ObsReportSettings{
+		ReceiverID:             settings.ID,
+		Transport:              "http",
+		ReceiverCreateSettings: settings,
+	})
+	if err != nil {
+		settings.Logger.Warn("failed to create obsreport; receiver metrics will be unavailable", zap.Error(err))
+	}
 	return &logsReceiver{
 		cfg:      cfg,
 		settings: settings,
 		consumer: consumer,
 		logger:   settings.Logger,
 		cursors:  make(map[string][]any, len(cfg.Indices)),
+		obsrecv:  obsrecv,
 	}
 }
 
@@ -191,7 +205,7 @@ func (r *logsReceiver) pollIndex(ctx context.Context, index string) {
 		}
 
 		logs, nextCursor := r.convertHits(hits)
-		if err := r.consumer.ConsumeLogs(ctx, logs); err != nil {
+		if err := r.consume(ctx, logs, len(hits)); err != nil {
 			r.logger.Error("failed to consume logs; will retry from last cursor",
 				zap.String("index", index), zap.Error(err))
 			return
@@ -227,6 +241,18 @@ func (r *logsReceiver) pollIndex(ctx context.Context, index string) {
 			return
 		}
 	}
+}
+
+// consume pushes a page of logs to the next consumer, recording receiver observability metrics
+// (accepted/refused log records) around the call.
+func (r *logsReceiver) consume(ctx context.Context, logs plog.Logs, numRecords int) error {
+	if r.obsrecv == nil {
+		return r.consumer.ConsumeLogs(ctx, logs)
+	}
+	obsCtx := r.obsrecv.StartLogsOp(ctx)
+	err := r.consumer.ConsumeLogs(obsCtx, logs)
+	r.obsrecv.EndLogsOp(obsCtx, dataFormat, numRecords, err)
+	return err
 }
 
 // hasDescendingSort reports whether any configured sort field uses descending order.
