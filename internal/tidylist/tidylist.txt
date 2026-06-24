@@ -264,6 +264,7 @@ receiver/cloudflarereceiver
 receiver/cloudfoundryreceiver
 receiver/collectdreceiver
 receiver/couchdbreceiver
+receiver/elasticsearchlogsreceiver
 receiver/elasticsearchreceiver
 receiver/envoyalsreceiver
 receiver/expvarreceiver
