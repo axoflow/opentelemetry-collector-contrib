@@ -1,0 +1,31 @@
+extensions:
+  file_storage:
+    directory: /var/lib/otelcol/storage
+
+receivers:
+  elasticsearchlogs:
+    endpoint: http://localhost:9200
+    username: elastic
+    password: ${env:ES_PASSWORD}
+    indices:
+      - logs-*
+    timestamp_field: "@timestamp"
+    sort:
+      - "@timestamp": asc
+      - _id: asc
+    page_size: 1000
+    poll_interval: 30s
+    start_at: end
+    initial_lookback: 1h
+    storage: file_storage
+
+exporters:
+  debug:
+    verbosity: detailed
+
+service:
+  extensions: [file_storage]
+  pipelines:
+    logs:
+      receivers: [elasticsearchlogs]
+      exporters: [debug]

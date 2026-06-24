@@ -1,0 +1,22 @@
+elasticsearchlogs:
+  endpoint: http://localhost:9200
+  username: otel
+  password: otelpw
+  indices:
+    - logs-*
+  query:
+    bool:
+      must:
+        - term:
+            service.name: checkout
+  timestamp_field: "@timestamp"
+  sort:
+    - "@timestamp": asc
+    - "event.id": asc
+  page_size: 500
+  batch_limit: 2000
+  poll_interval: 15s
+  initial_delay: 1s
+  start_at: end
+  initial_lookback: 1h
+  storage: file_storage
