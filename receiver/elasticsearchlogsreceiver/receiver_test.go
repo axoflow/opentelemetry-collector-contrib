@@ -119,14 +119,14 @@ func TestPollIndexPaginatesAndCheckpoints(t *testing.T) {
 	store := newMemStorage()
 	r := newTestReceiver(t, client, sink, store)
 
-	cursor := r.pollIndex(context.Background(), "logs-*", nil)
+	cursor := r.pollIndex(t.Context(), "logs-*", nil)
 
 	// 3 records consumed across two pages; third page is short so polling stops.
 	assert.Equal(t, 3, sink.LogRecordCount())
 
 	// cursor advanced to the last document and was persisted under the index key.
 	assert.Equal(t, []any{"2026-06-17T10:00:02.000Z", "c"}, cursor)
-	persisted, err := newCursorPersister(store).Load(context.Background(), "logs-*")
+	persisted, err := newCursorPersister(store).Load(t.Context(), "logs-*")
 	require.NoError(t, err)
 	assert.Equal(t, []any{"2026-06-17T10:00:02.000Z", "c"}, persisted)
 
@@ -142,7 +142,7 @@ func TestPollIndexEmpty(t *testing.T) {
 	sink := new(consumertest.LogsSink)
 	r := newTestReceiver(t, client, sink, newMemStorage())
 
-	cursor := r.pollIndex(context.Background(), "logs-*", nil)
+	cursor := r.pollIndex(t.Context(), "logs-*", nil)
 	assert.Equal(t, 0, sink.LogRecordCount())
 	assert.Nil(t, cursor)
 }
@@ -155,7 +155,7 @@ func TestPollIndexConsumerError(t *testing.T) {
 	store := newMemStorage()
 	r := newTestReceiver(t, client, sink, store)
 
-	cursor := r.pollIndex(context.Background(), "logs-*", nil)
+	cursor := r.pollIndex(t.Context(), "logs-*", nil)
 
 	// cursor must NOT advance when the consumer rejects the batch.
 	assert.Nil(t, cursor)
@@ -169,7 +169,7 @@ func TestPollIndexResumesFromCursor(t *testing.T) {
 	r := newTestReceiver(t, client, sink, newMemStorage())
 
 	start := []any{"2026-06-17T09:59:59.000Z", "z"}
-	r.pollIndex(context.Background(), "logs-*", start)
+	r.pollIndex(t.Context(), "logs-*", start)
 
 	calls := client.callsFor("logs-*")
 	require.Len(t, calls, 1)
@@ -186,7 +186,7 @@ func TestPollIndexRefusesPageWithMissingFinalSort(t *testing.T) {
 	store := newMemStorage()
 	r := newTestReceiver(t, client, sink, store)
 
-	cursor := r.pollIndex(context.Background(), "logs-*", nil)
+	cursor := r.pollIndex(t.Context(), "logs-*", nil)
 
 	assert.Equal(t, 0, sink.LogRecordCount(), "page with unusable cursor must not be delivered")
 	assert.Nil(t, cursor)
@@ -205,7 +205,7 @@ func TestPollIndexUsesLastHitSort(t *testing.T) {
 	sink := new(consumertest.LogsSink)
 	r := newTestReceiver(t, client, sink, newMemStorage())
 
-	cursor := r.pollIndex(context.Background(), "logs-*", nil)
+	cursor := r.pollIndex(t.Context(), "logs-*", nil)
 	assert.Equal(t, 2, sink.LogRecordCount())
 	assert.Equal(t, []any{"2026-06-17T10:00:01.000Z", "b"}, cursor)
 }
@@ -221,8 +221,8 @@ func TestPollIndexAppliesLowerBoundOnlyWithoutCursor(t *testing.T) {
 	r.cfg.Query = nil
 	r.lowerBound = time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
 
-	r.pollIndex(context.Background(), "fresh", nil)
-	r.pollIndex(context.Background(), "resumed", []any{"2026-06-17T00:00:00.000Z", "x"})
+	r.pollIndex(t.Context(), "fresh", nil)
+	r.pollIndex(t.Context(), "resumed", []any{"2026-06-17T00:00:00.000Z", "x"})
 
 	// fresh index (nil cursor) → query carries a range filter on the timestamp field.
 	freshReq := client.callsFor("fresh")[0]
@@ -283,7 +283,7 @@ func TestPollOnceBatchLimit(t *testing.T) {
 	r.persister = newCursorPersister(store)
 
 	// First cycle: fetch at most batch_limit (3) documents, never overshooting.
-	cursor := r.pollIndex(context.Background(), "logs-1", nil)
+	cursor := r.pollIndex(t.Context(), "logs-1", nil)
 	assert.Equal(t, 3, sink.LogRecordCount())
 	for _, c := range client.calls {
 		assert.LessOrEqual(t, c.req.Size, 2, "request size must never exceed page_size")
@@ -295,7 +295,7 @@ func TestPollOnceBatchLimit(t *testing.T) {
 	assert.Equal(t, docs[2].Sort, cursor)
 
 	// Second cycle: picks up where it left off and drains the remaining 2.
-	cursor = r.pollIndex(context.Background(), "logs-1", cursor)
+	cursor = r.pollIndex(t.Context(), "logs-1", cursor)
 	assert.Equal(t, 5, sink.LogRecordCount())
 	assert.Equal(t, docs[4].Sort, cursor)
 }
@@ -315,16 +315,16 @@ func TestPollIndexPerIndexCursorsAreIndependent(t *testing.T) {
 	r.persister = newCursorPersister(store)
 
 	// Each index is polled with its own cursor and checkpointed under its own key.
-	ca := r.pollIndex(context.Background(), "logs-a", nil)
-	cb := r.pollIndex(context.Background(), "logs-b", nil)
+	ca := r.pollIndex(t.Context(), "logs-a", nil)
+	cb := r.pollIndex(t.Context(), "logs-b", nil)
 
 	assert.Equal(t, []any{"2026-06-17T10:00:00.000Z", "a1"}, ca)
 	assert.Equal(t, []any{"2026-06-17T11:00:01.000Z", "b2"}, cb)
 
-	a, err := newCursorPersister(store).Load(context.Background(), "logs-a")
+	a, err := newCursorPersister(store).Load(t.Context(), "logs-a")
 	require.NoError(t, err)
 	assert.Equal(t, []any{"2026-06-17T10:00:00.000Z", "a1"}, a)
-	b, err := newCursorPersister(store).Load(context.Background(), "logs-b")
+	b, err := newCursorPersister(store).Load(t.Context(), "logs-b")
 	require.NoError(t, err)
 	assert.Equal(t, []any{"2026-06-17T11:00:01.000Z", "b2"}, b)
 
