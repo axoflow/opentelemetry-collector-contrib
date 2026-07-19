@@ -8,3 +8,8 @@ status:
   codeowners:
     active: [overorion]
   unsupported_platforms: []
+
+tests:
+  config:
+    access_token: "dummy-token-for-lifecycle-test"
+    cloud: "us-1"
