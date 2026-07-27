@@ -1,0 +1,20 @@
+display_name: Tenable Audit Log Receiver
+type: tenable_audit_log
+
+description: |
+  The Tenable Audit Log Receiver polls the Tenable Vulnerability Management audit log API
+  (`/audit-log/v1/events`) and emits each audit event as a log record.
+
+status:
+  class: receiver
+  stability:
+    development: [logs]
+  distributions: [contrib]
+  codeowners:
+    active: [OverOrion]
+
+tests:
+  config:
+    endpoint: http://localhost:0
+    access_key: fakeaccesskey
+    secret_key: fakesecretkey

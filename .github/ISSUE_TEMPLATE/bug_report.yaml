@@ -360,6 +360,7 @@ body:
       - receiver/systemd
       - receiver/tcpcheck
       - receiver/tcplog
+      - receiver/tenableauditlog
       - receiver/tlscheck
       - receiver/udplog
       - receiver/vcenter

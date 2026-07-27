@@ -337,6 +337,7 @@ components:
     - receiver/systemd
     - receiver/tcp_check
     - receiver/tcp_log
+    - receiver/tenable_audit_log
     - receiver/tls_check
     - receiver/udp_log
     - receiver/vcenter

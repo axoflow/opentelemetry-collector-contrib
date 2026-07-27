@@ -333,6 +333,7 @@ receiver/statsdreceiver
 receiver/systemdreceiver
 receiver/tcpcheckreceiver
 receiver/tcplogreceiver
+receiver/tenableauditlogreceiver
 receiver/tlscheckreceiver
 receiver/udplogreceiver
 receiver/vcenterreceiver

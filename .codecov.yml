@@ -993,6 +993,10 @@ component_management:
     name: receiver_tcplog
     paths:
     - receiver/tcplogreceiver/**
+  - component_id: receiver_tenableauditlog
+    name: receiver_tenableauditlog
+    paths:
+    - receiver/tenableauditlogreceiver/**
   - component_id: receiver_tlscheck
     name: receiver_tlscheck
     paths:
