@@ -1,0 +1,20 @@
+display_name: Idira Receiver
+type: idira
+
+description: |
+  Polls the Idira SIEM integration stream API for audit events and emits them as logs.
+
+status:
+  class: receiver
+  stability:
+    development: [logs]
+  codeowners:
+    active: [TODO_GITHUB_HANDLE]
+
+tests:
+  config:
+    endpoint: http://localhost:8080
+    api_key: an-api-key
+    token_url: http://localhost:8080/OAuth2/Token/web_app_id
+    client_id: siem-integration
+    client_secret: a-secret

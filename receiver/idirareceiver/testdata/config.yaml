@@ -1,0 +1,21 @@
+idira:
+  endpoint: https://audit.example.cloud
+  api_key: an-api-key
+  token_url: https://identity.example.cloud/OAuth2/Token/web_app_id
+  client_id: siem-integration
+  client_secret: a-secret
+  poll_interval: 5m
+  initial_lookback: 1h
+  page_size: 100
+  application_codes: [DPA]
+  storage: file_storage
+
+idira/defaults:
+  endpoint: https://audit.example.cloud
+  api_key: an-api-key
+  token_url: https://identity.example.cloud/OAuth2/Token/web_app_id
+  client_id: siem-integration
+  client_secret: a-secret
+
+idira/invalid:
+  poll_interval: 30s

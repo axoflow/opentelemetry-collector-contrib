@@ -279,6 +279,7 @@ components:
     - receiver/http_check
     - receiver/huaweicloudcesreceiver
     - receiver/icmpcheckreceiver
+    - receiver/idira
     - receiver/iis
     - receiver/influxdb
     - receiver/jaeger
