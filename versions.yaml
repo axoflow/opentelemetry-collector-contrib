@@ -331,6 +331,7 @@ module-sets:
       - github.com/open-telemetry/opentelemetry-collector-contrib/receiver/systemdreceiver
       - github.com/open-telemetry/opentelemetry-collector-contrib/receiver/tcpcheckreceiver
       - github.com/open-telemetry/opentelemetry-collector-contrib/receiver/tcplogreceiver
+      - github.com/open-telemetry/opentelemetry-collector-contrib/receiver/tenableauditlogreceiver
       - github.com/open-telemetry/opentelemetry-collector-contrib/receiver/tlscheckreceiver
       - github.com/open-telemetry/opentelemetry-collector-contrib/receiver/udplogreceiver
       - github.com/open-telemetry/opentelemetry-collector-contrib/receiver/vcenterreceiver

@@ -1,0 +1,9 @@
+tenable_audit_log:
+  endpoint: https://cloud.tenable.example
+  access_key: testaccesskey
+  secret_key: testsecretkey
+  poll_interval: 1m
+  page_size: 500
+  max_records_per_poll: 2000
+  initial_lookback: 6h
+  storage: file_storage
