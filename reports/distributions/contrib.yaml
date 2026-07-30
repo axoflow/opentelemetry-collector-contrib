@@ -233,6 +233,7 @@ components:
         - systemd
         - tcp_check
         - tcp_log
+        - tenable_audit_log
         - tls_check
         - udp_log
         - vcenter
