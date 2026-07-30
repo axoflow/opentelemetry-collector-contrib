@@ -281,6 +281,7 @@ receiver/haproxyreceiver
 receiver/httpcheckreceiver
 receiver/huaweicloudcesreceiver
 receiver/icmpcheckreceiver
+receiver/idirareceiver
 receiver/iisreceiver
 receiver/influxdbreceiver
 receiver/jmxreceiver
