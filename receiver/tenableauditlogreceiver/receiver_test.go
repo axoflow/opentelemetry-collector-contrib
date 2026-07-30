@@ -21,14 +21,19 @@ import (
 	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/tenableauditlogreceiver/internal/metadata"
 )
 
+// Tenable reports `received` with millisecond precision; the second-precision form is kept on the
+// first event so both are covered.
 var testEvents = []map[string]any{
 	{"id": "1", "action": "user.login", "received": "2026-07-01T10:00:00Z"},
-	{"id": "2", "action": "user.logout", "received": "2026-07-01T11:00:00Z"},
-	{"id": "3", "action": "scan.create", "received": "2026-07-01T11:00:00Z"},
+	{"id": "2", "action": "user.logout", "received": "2026-07-01T11:00:00.904Z"},
+	{"id": "3", "action": "scan.create", "received": "2026-07-01T11:00:00.904Z"},
 }
 
+// checkpointInstant is the newest timestamp in testEvents.
+var checkpointInstant = time.Date(2026, 7, 1, 11, 0, 0, int(904*time.Millisecond), time.UTC)
+
 // newTestServer serves testEvents two at a time, ignoring the date filter the same way the
-// audit log API does when an event is indexed into a second the receiver has already read.
+// audit log API does when an event is indexed into an instant the receiver has already read.
 func newTestServer(t *testing.T) *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		assert.Equal(t, "accessKey=key;secretKey=secret", req.Header.Get("X-ApiKeys"))
@@ -80,8 +85,9 @@ func TestPollPaginatesAndDeduplicates(t *testing.T) {
 		records.At(0).Body().Map().AsRaw())
 	assert.NotZero(t, records.At(0).ObservedTimestamp())
 
-	// The newest event time is shared by two events, so both ids must be remembered.
-	assert.Equal(t, "2026-07-01T11:00:00Z", r.cp.LastEventTime.Format(time.RFC3339))
+	// The newest event time is shared by two events, so both ids must be remembered. The
+	// checkpoint keeps the fractional part of `received`.
+	assert.Equal(t, checkpointInstant, r.cp.LastEventTime.UTC())
 	assert.Equal(t, []string{"2", "3"}, r.cp.SeenIDs)
 
 	// A second poll re-reads the same events and must emit nothing.
@@ -89,12 +95,13 @@ func TestPollPaginatesAndDeduplicates(t *testing.T) {
 	assert.Equal(t, 3, sink.LogRecordCount())
 }
 
-// An event can be indexed after the poll that already read its second. The inclusive date.gte
-// filter returns it again, and only the ids already emitted at that second are skipped.
-func TestPollEmitsLateEventSharingCheckpointSecond(t *testing.T) {
-	late := map[string]any{"id": "4", "action": "scan.delete", "received": "2026-07-01T11:00:00Z"}
+// An event can be indexed after the poll that already read its instant. The inclusive date.gte
+// filter returns it again, and only the ids already emitted at that instant are skipped. The filter
+// must carry the checkpoint's milliseconds, otherwise the window reaches further back than it needs.
+func TestPollEmitsLateEventSharingCheckpointInstant(t *testing.T) {
+	late := map[string]any{"id": "4", "action": "scan.delete", "received": "2026-07-01T11:00:00.904Z"}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		assert.Contains(t, req.URL.Query().Get("f"), "date.gte:2026-07-01T11:00:00Z")
+		assert.Equal(t, "date.gte:2026-07-01T11:00:00.904Z", req.URL.Query().Get("f"))
 		assert.NoError(t, json.NewEncoder(w).Encode(auditLogResponse{
 			Events: []map[string]any{testEvents[1], testEvents[2], late},
 		}))
@@ -103,7 +110,7 @@ func TestPollEmitsLateEventSharingCheckpointSecond(t *testing.T) {
 
 	sink := new(consumertest.LogsSink)
 	r := newTestReceiver(t, server.URL, sink)
-	r.cp = checkpoint{LastEventTime: time.Date(2026, 7, 1, 11, 0, 0, 0, time.UTC), SeenIDs: []string{"2", "3"}}
+	r.cp = checkpoint{LastEventTime: checkpointInstant, SeenIDs: []string{"2", "3"}}
 
 	require.NoError(t, r.poll(t.Context()))
 	require.Equal(t, 1, sink.LogRecordCount())
@@ -187,7 +194,7 @@ func TestCheckpointPersistence(t *testing.T) {
 	client := &memoryStorage{data: map[string][]byte{}}
 	r.storage = client
 
-	r.cp = checkpoint{LastEventTime: time.Date(2026, 7, 1, 11, 0, 0, 0, time.UTC), SeenIDs: []string{"2"}}
+	r.cp = checkpoint{LastEventTime: checkpointInstant, SeenIDs: []string{"2"}}
 	r.saveCheckpoint(t.Context())
 
 	restored := newTestReceiver(t, "https://cloud.tenable.example", sink)

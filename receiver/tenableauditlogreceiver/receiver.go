@@ -46,8 +46,8 @@ type auditLogResponse struct {
 type checkpoint struct {
 	LastEventTime time.Time `json:"last_event_time"`
 	// SeenIDs holds the ids of the events sharing LastEventTime. The query filter is inclusive of
-	// LastEventTime, so that an event indexed after the poll that read the same second is not
-	// missed; the events already emitted at that second are deduplicated by id instead.
+	// LastEventTime, so that an event indexed after the poll that read the same instant is not
+	// missed; the events already emitted at that instant are deduplicated by id instead.
 	SeenIDs []string `json:"seen_ids"`
 }
 
@@ -206,7 +206,10 @@ func (r *tenableReceiver) fetch(ctx context.Context, since time.Time) ([]map[str
 
 func (r *tenableReceiver) request(ctx context.Context, since time.Time, limit int, nextToken string) (*auditLogResponse, error) {
 	query := url.Values{}
-	query.Set("f", "date.gte:"+since.UTC().Format("2006-01-02T15:04:05Z"))
+	// `received` carries milliseconds, and the date filter accepts them, so the checkpoint is sent
+	// at full precision. Truncating to seconds would only widen the window with events the
+	// checkpoint discards again.
+	query.Set("f", "date.gte:"+since.UTC().Format("2006-01-02T15:04:05.000Z07:00"))
 	// Events are not returned in time order by default, so a poll truncated by
 	// max_records_per_poll would advance the checkpoint past events it never read.
 	query.Set("sort", "received:asc")

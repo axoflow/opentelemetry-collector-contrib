@@ -1,7 +1,6 @@
 change_type: new_component
 component: receiver/tenable_audit_log
 note: Add a receiver that polls the Tenable Vulnerability Management audit log API and emits audit events as logs
-# TODO: replace with the new component tracking issue number (or the PR number).
-issues: []
+issues: [37]
 subtext:
 change_logs: [user]

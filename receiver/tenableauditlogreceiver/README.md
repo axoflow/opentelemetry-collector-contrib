@@ -62,13 +62,14 @@ pagination (starting from `next=0`) until the API stops returning a `next` curso
 becomes one log record whose body is the raw event map, with the record timestamp taken from the
 event's `received` field.
 
-The filter is inclusive of the checkpoint so that an event indexed after the poll which already read
-its second is not missed. The receiver therefore filters events locally against the checkpoint, which
-stores the newest event time plus the ids of the events sharing that time. Ascending order matters
-for the same reason: a poll truncated by `max_records_per_poll` would otherwise advance the
-checkpoint past events it never read. A failed poll leaves the checkpoint untouched, so the next poll
-retries the same window rather than skipping events; this can produce duplicates if the failure
-happens after the collector has already accepted part of a batch.
+The checkpoint is sent at millisecond precision, matching the resolution of `received`. The filter is
+inclusive of the checkpoint so that an event indexed after the poll which already read its instant is
+not missed. The receiver therefore filters events locally against the checkpoint, which stores the
+newest event time plus the ids of the events sharing that time. Ascending order matters for the same
+reason: a poll truncated by `max_records_per_poll` would otherwise advance the checkpoint past events
+it never read. A failed poll leaves the checkpoint untouched, so the next poll retries the same window
+rather than skipping events; this can produce duplicates if the failure happens after the collector
+has already accepted part of a batch.
 
 When Tenable rejects a request with `429 Too Many Requests`, the receiver stops polling until the
 `Retry-After` deadline in the response passes (falling back to `poll_interval` when the header is
