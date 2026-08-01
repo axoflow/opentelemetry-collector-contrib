@@ -37,6 +37,10 @@ type CrowdstrikeReceiverConfig struct {
 	// PollInterval specifies how often to poll the CrowdStrike API for new data.
 	PollInterval *time.Duration `mapstructure:"poll_interval"`
 
+	// InitialLookback bounds how far back the first poll reaches. Zero means
+	// only data arriving after the receiver starts is collected.
+	InitialLookback time.Duration `mapstructure:"initial_lookback"`
+
 	// Debug enables debug logging of all HTTP traffic going through the API runtime.
 	Debug bool `mapstructure:"debug"`
 

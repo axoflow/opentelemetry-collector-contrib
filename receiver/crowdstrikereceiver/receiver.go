@@ -6,6 +6,7 @@ package crowdstrikereceiver // import "github.com/open-telemetry/opentelemetry-c
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/crowdstrike/gofalcon/falcon/client"
@@ -18,6 +19,15 @@ import (
 	"go.uber.org/zap"
 )
 
+// FQL timestamp literal with millisecond precision, which is the granularity
+// updated_timestamp carries. The filter on it is inclusive at the checkpoint:
+// alerts can share a millisecond, and a strictly-greater filter would skip the
+// ones a full page had no room for.
+const fqlTimestampLayout = "2006-01-02T15:04:05.000Z"
+
+// alertPageSize is how many not-yet-seen alerts a page asks for.
+const alertPageSize = 500
+
 type crowdstrikeReceiver struct {
 	cancel       context.CancelFunc
 	logger       *zap.Logger
@@ -25,6 +35,11 @@ type crowdstrikeReceiver struct {
 	config       *CrowdstrikeReceiverConfig
 	client       *client.CrowdStrikeAPISpecification
 	pollInterval time.Duration
+
+	// alertCheckpoint is the highest updated_timestamp consumed so far. It is
+	// only advanced after a successful ConsumeLogs, so a failed delivery is
+	// retried on the next tick.
+	alertCheckpoint time.Time
 }
 
 func (r *crowdstrikeReceiver) Shutdown(_ context.Context) error {
@@ -34,83 +49,106 @@ func (r *crowdstrikeReceiver) Shutdown(_ context.Context) error {
 	return nil
 }
 
-func (r *crowdstrikeReceiver) Start(ctx context.Context, _ component.Host) error {
-	ctx = context.Background()
-	ctx, r.cancel = context.WithCancel(ctx)
+func (r *crowdstrikeReceiver) Start(_ context.Context, _ component.Host) error {
+	ctx, cancel := context.WithCancel(context.Background())
+	r.cancel = cancel
 
-	go func() {
-		ticker := time.NewTicker(r.pollInterval)
-		defer ticker.Stop()
+	r.alertCheckpoint = time.Now().Add(-r.config.InitialLookback)
 
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				r.logger.Debug("CrowdStrike receiver tick")
-				queries, err := r.client.Alerts.QueryV2(alerts.NewQueryV2Params())
-				if err != nil {
-					r.logger.Error("Error querying alerts from CrowdStrike", zap.Error(err))
-					continue
-				}
-				paramsCompositeIDs := models.DetectsapiPostEntitiesAlertsV2Request{
-					CompositeIds: queries.GetPayload().Resources,
-				}
+	go r.poll(ctx, "alerts", r.pollAlertsOnce)
+	return nil
+}
 
-				alerts, err := r.client.Alerts.GetV2(alerts.NewGetV2Params().WithBody(&paramsCompositeIDs))
-				if err != nil {
-					r.logger.Error("Error fetching alerts from CrowdStrike", zap.Error(err))
-					continue
-				}
+func (r *crowdstrikeReceiver) poll(ctx context.Context, name string, once func(context.Context) error) {
+	ticker := time.NewTicker(r.pollInterval)
+	defer ticker.Stop()
 
-				// Log rate limit information
-				r.logger.Debug("CrowdStrike API rate limits",
-					zap.String("trace_id", alerts.XCSTRACEID),
-					zap.Int64("rate_limit", alerts.XRateLimitLimit),
-					zap.Int64("rate_limit_remaining", alerts.XRateLimitRemaining),
-				)
+	// The first poll goes out on start rather than an interval later: a
+	// collector restarted more often than the cadence it was given — a
+	// crashlooping pod on a minutes-long poll_interval — would never reach a
+	// tick, and so never collect anything at all.
+	for ctx.Err() == nil {
+		r.logger.Debug("CrowdStrike receiver tick", zap.String("poller", name))
+		if err := once(ctx); err != nil {
+			r.logger.Error("CrowdStrike poll failed", zap.String("poller", name), zap.Error(err))
+		}
 
-				// Check rate limit and adjust polling if needed
-				if alerts.XRateLimitRemaining < alerts.XRateLimitLimit/10 { // Less than 10% remaining
-					r.logger.Warn("CrowdStrike API rate limit nearly exhausted, backing off",
-						zap.Int64("remaining", alerts.XRateLimitRemaining),
-						zap.Int64("limit", alerts.XRateLimitLimit),
-					)
-					// Temporarily slow down polling by waiting extra time
-					backoffDuration := r.pollInterval * 2
-					select {
-					case <-ctx.Done():
-						return
-					case <-time.After(backoffDuration):
-						// Continue after backoff
-					}
-				}
+		select {
+		case <-ctx.Done():
+		case <-ticker.C:
+		}
+	}
+}
 
-				// Check if we have alerts in the payload
-				if alerts.Payload == nil {
-					r.logger.Debug("No alerts returned from CrowdStrike")
-					continue
-				}
+func (r *crowdstrikeReceiver) pollAlertsOnce(ctx context.Context) error {
+	// Instead of offset pagination, each page advances the updated_timestamp
+	// filter: the result set cannot shift under us while we page through it.
+	// The filter is inclusive, so the alerts already consumed at the
+	// checkpoint millisecond come back with every page; they are recognized by
+	// composite_id and the page budget is widened to make room for them, which
+	// is what keeps a tie straddling the page boundary from being skipped.
+	for {
+		filter := fmt.Sprintf("updated_timestamp:>'%s'", r.alertCheckpoint.UTC().Format(fqlTimestampLayout))
+		sort := "updated_timestamp|asc"
+		limit := int64(alertPageSize)
+		queried, err := r.client.Alerts.QueryV2(alerts.NewQueryV2Params().
+			WithContext(ctx).
+			WithFilter(&filter).
+			WithSort(&sort).
+			WithLimit(&limit))
+		if err != nil {
+			return fmt.Errorf("querying alert IDs: %w", err)
+		}
+		ids := queried.GetPayload().Resources
+		if len(ids) == 0 {
+			return nil
+		}
 
-				logs, err := convertAlertToPlogLogs(alerts)
-				if err != nil {
-					r.logger.Error("Error converting alerts to plog.Logs",
-						zap.Error(err),
-						zap.String("trace_id", alerts.XCSTRACEID),
-					)
-					continue
-				}
+		fetched, err := r.client.Alerts.GetV2(alerts.NewGetV2Params().
+			WithContext(ctx).
+			WithBody(&models.DetectsapiPostEntitiesAlertsV2Request{CompositeIds: ids}))
+		if err != nil {
+			return fmt.Errorf("fetching alerts: %w", err)
+		}
 
-				if err = r.nextConsumer.ConsumeLogs(ctx, *logs); err != nil {
-					r.logger.Error("Error consuming logs",
-						zap.Error(err),
-						zap.String("trace_id", alerts.XCSTRACEID),
-					)
-				}
+		r.backOffOnRateLimit(ctx, fetched.XRateLimitLimit, fetched.XRateLimitRemaining)
+
+		if fetched.Payload == nil {
+			return nil
+		}
+
+		logs, err := convertAlertToPlogLogs(fetched)
+		if err != nil {
+			return fmt.Errorf("converting alerts (trace_id %s): %w", fetched.XCSTRACEID, err)
+		}
+		if err := r.nextConsumer.ConsumeLogs(ctx, *logs); err != nil {
+			return fmt.Errorf("consuming alerts (trace_id %s): %w", fetched.XCSTRACEID, err)
+		}
+
+		for _, alert := range fetched.Payload.Resources {
+			if alert.UpdatedTimestamp != nil && time.Time(*alert.UpdatedTimestamp).After(r.alertCheckpoint) {
+				r.alertCheckpoint = time.Time(*alert.UpdatedTimestamp)
 			}
 		}
-	}()
-	return nil
+
+		if len(ids) < alertPageSize {
+			return nil
+		}
+	}
+}
+
+func (r *crowdstrikeReceiver) backOffOnRateLimit(ctx context.Context, limit, remaining int64) {
+	if remaining >= limit/10 {
+		return
+	}
+	r.logger.Warn("CrowdStrike API rate limit nearly exhausted, backing off",
+		zap.Int64("remaining", remaining),
+		zap.Int64("limit", limit),
+	)
+	select {
+	case <-ctx.Done():
+	case <-time.After(r.pollInterval * 2):
+	}
 }
 
 func convertAlertToPlogLogs(alerts *alerts.GetV2OK) (*plog.Logs, error) {

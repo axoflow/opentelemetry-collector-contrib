@@ -124,7 +124,7 @@ func newCrowdstrikeReceiver(ctx context.Context, cfg *CrowdstrikeReceiverConfig,
 	logger.Info("CrowdStrike client created successfully")
 
 	// Determine poll interval
-	pollInterval := 1 * time.Second
+	pollInterval := 30 * time.Second
 	if cfg.PollInterval != nil {
 		pollInterval = *cfg.PollInterval
 	}
