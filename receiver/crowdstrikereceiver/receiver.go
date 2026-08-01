@@ -7,10 +7,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/crowdstrike/gofalcon/falcon/client"
 	"github.com/crowdstrike/gofalcon/falcon/client/alerts"
+	"github.com/crowdstrike/gofalcon/falcon/client/ngsiem"
 	"github.com/crowdstrike/gofalcon/falcon/models"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer"
@@ -28,6 +30,37 @@ const fqlTimestampLayout = "2006-01-02T15:04:05.000Z"
 // alertPageSize is how many not-yet-seen alerts a page asks for.
 const alertPageSize = 500
 
+const searchStatusPollInterval = time.Second
+
+// searchBatchLimit is the result-set size requested via an explicit
+// sort(limit=...); without it the server caps a query job at 200 events.
+// A plain query reports truncation in metaData.extraData.hasMoreEvents, but
+// the sort suppresses that field, so a full batch is what signals backlog
+// here: worth at most one redundant poll when the window holds exactly
+// searchBatchLimit events, and never misses backlog.
+const searchBatchLimit = 10000
+
+// searchIngestLag holds the ingest window's end that far behind the collector's
+// clock. The window is closed on the collector's own time and never re-queried,
+// so an event stamped inside it but searchable only afterwards — NG-SIEM's own
+// indexing lag, or a collector clock running ahead of CrowdStrike's ingest
+// clock — would be lost for good. Live probes had events searchable within
+// seconds of their ingest stamp, so this margin covers both with room to spare;
+// the cost is that events arrive that much later, and the @id boundary
+// deduplication already covers the seam the window ends on.
+const searchIngestLag = 30 * time.Second
+
+// The fields NG-SIEM puts on every event it returns. @ingesttimestamp is the
+// one the ingest window, the sort the query job is given and the checkpoint
+// arithmetic are all expressed in — they have to name the same field or the
+// batch cannot be resumed from where it was truncated. @id identifies an event
+// within the repository, and @timestamp is the event's own time.
+const (
+	ingestTimestampField = "@ingesttimestamp"
+	eventIDField         = "@id"
+	timestampField       = "@timestamp"
+)
+
 type crowdstrikeReceiver struct {
 	cancel       context.CancelFunc
 	logger       *zap.Logger
@@ -36,10 +69,12 @@ type crowdstrikeReceiver struct {
 	client       *client.CrowdStrikeAPISpecification
 	pollInterval time.Duration
 
-	// alertCheckpoint is the highest updated_timestamp consumed so far. It is
-	// only advanced after a successful ConsumeLogs, so a failed delivery is
-	// retried on the next tick.
-	alertCheckpoint time.Time
+	// alertCheckpoint is the highest updated_timestamp consumed so far;
+	// searchCheckpoint is the ingest-time lower bound of the next search
+	// window. Both are only advanced after a successful ConsumeLogs, so a
+	// failed delivery is retried on the next tick.
+	alertCheckpoint  time.Time
+	searchCheckpoint time.Time
 }
 
 func (r *crowdstrikeReceiver) Shutdown(_ context.Context) error {
@@ -53,9 +88,16 @@ func (r *crowdstrikeReceiver) Start(_ context.Context, _ component.Host) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	r.cancel = cancel
 
-	r.alertCheckpoint = time.Now().Add(-r.config.InitialLookback)
+	start := time.Now().Add(-r.config.InitialLookback)
+	r.alertCheckpoint = start
+	r.searchCheckpoint = start
 
-	go r.poll(ctx, "alerts", r.pollAlertsOnce)
+	if !r.config.DisableAlerts {
+		go r.poll(ctx, "alerts", r.pollAlertsOnce)
+	}
+	if r.config.NGSIEMSearch.Repository != "" {
+		go r.poll(ctx, "ngsiem_search", r.pollSearchOnce)
+	}
 	return nil
 }
 
@@ -137,6 +179,168 @@ func (r *crowdstrikeReceiver) pollAlertsOnce(ctx context.Context) error {
 	}
 }
 
+// withoutSeenAlerts drops the alerts whose composite_id is in seen. Alerts
+// without one are kept: dropping them would be a guess.
+func withoutSeenAlerts(alerts []*models.DetectsAlert, seen map[string]struct{}) []*models.DetectsAlert {
+	if len(seen) == 0 {
+		return alerts
+	}
+	fresh := make([]*models.DetectsAlert, 0, len(alerts))
+	for _, alert := range alerts {
+		if id, ok := alertID(alert); ok {
+			if _, dup := seen[id]; dup {
+				continue
+			}
+		}
+		fresh = append(fresh, alert)
+	}
+	return fresh
+}
+
+func alertIDsAt(alerts []*models.DetectsAlert, millis int64) map[string]struct{} {
+	var ids map[string]struct{}
+	for _, alert := range alerts {
+		if alert.UpdatedTimestamp == nil || time.Time(*alert.UpdatedTimestamp).UnixMilli() != millis {
+			continue
+		}
+		id, ok := alertID(alert)
+		if !ok {
+			continue
+		}
+		if ids == nil {
+			ids = make(map[string]struct{})
+		}
+		ids[id] = struct{}{}
+	}
+	return ids
+}
+
+func alertID(alert *models.DetectsAlert) (string, bool) {
+	if alert.CompositeID == nil {
+		return "", false
+	}
+	return *alert.CompositeID, *alert.CompositeID != ""
+}
+
+func (r *crowdstrikeReceiver) pollSearchOnce(ctx context.Context) error {
+	windowEnd := time.Now().Add(-searchIngestLag)
+	if !windowEnd.After(r.searchCheckpoint) {
+		// The window only opens searchIngestLag after the checkpoint, so a
+		// receiver started without an initial_lookback has nothing to ask for
+		// until the lag has elapsed. Asking anyway would re-query what the
+		// previous window already delivered and move the checkpoint backwards.
+		r.logger.Debug("NG-SIEM search window has not opened yet, skipping the tick",
+			zap.Time("checkpoint", r.searchCheckpoint))
+		return nil
+	}
+
+	query := r.config.NGSIEMSearch.QueryString
+	if query == "" {
+		query = "*"
+	}
+	query = fmt.Sprintf("%s | sort(@ingesttimestamp, order=asc, limit=%d)", query, searchBatchLimit)
+	started, err := r.client.Ngsiem.StartSearchV1(ngsiem.NewStartSearchV1Params().
+		WithContext(ctx).
+		WithRepository(r.config.NGSIEMSearch.Repository).
+		WithBody(&models.APIQueryJobInput{
+			QueryString: &query,
+			IngestStart: strconv.FormatInt(r.searchCheckpoint.UnixMilli(), 10),
+			IngestEnd:   strconv.FormatInt(windowEnd.UnixMilli(), 10),
+		}))
+	if err != nil {
+		return fmt.Errorf("starting query job: %w", err)
+	}
+	jobID := *started.GetPayload().ID
+
+	var results *models.APIQueryJobsResults
+	for {
+		status, err := r.client.Ngsiem.GetSearchStatusV1(ngsiem.NewGetSearchStatusV1Params().
+			WithContext(ctx).
+			WithRepository(r.config.NGSIEMSearch.Repository).
+			WithID(jobID))
+		if err != nil {
+			return fmt.Errorf("polling query job %s: %w", jobID, err)
+		}
+		results = status.GetPayload()
+		if results.Done != nil && *results.Done {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(searchStatusPollInterval):
+		}
+	}
+
+	if len(results.Events) > 0 {
+		logs, err := convertSearchEventsToPlogLogs(results.Events)
+		if err != nil {
+			return fmt.Errorf("converting query job %s events: %w", jobID, err)
+		}
+		if err := r.nextConsumer.ConsumeLogs(ctx, *logs); err != nil {
+			return fmt.Errorf("consuming query job %s events: %w", jobID, err)
+		}
+	}
+
+	// A full batch means the window holds more events than searchBatchLimit:
+	// resume from the newest consumed ingest timestamp so the next tick drains
+	// the remainder (events sharing that millisecond may be re-fetched),
+	// instead of skipping to windowEnd and silently dropping the backlog.
+	if maxIngest, ok := maxIngestTimestamp(results.Events); ok && len(results.Events) == searchBatchLimit {
+		resumeFrom := time.UnixMilli(maxIngest)
+		if !resumeFrom.After(r.searchCheckpoint) {
+			// Bulk-ingested events can share one @ingesttimestamp millisecond;
+			// when more than searchBatchLimit of them do, resuming from it
+			// cannot progress. Step past it and say what may have been lost.
+			resumeFrom = r.searchCheckpoint.Add(time.Millisecond)
+			r.logger.Warn("NG-SIEM search stuck on one ingest millisecond holding more events than the batch limit, "+
+				"stepping past it; events beyond the batch limit in that millisecond are not collected",
+				zap.Time("ingest_millisecond", r.searchCheckpoint),
+				zap.Int("batch", len(results.Events)))
+		} else {
+			r.logger.Info("NG-SIEM search window truncated at batch limit, draining backlog",
+				zap.Int("batch", len(results.Events)),
+				zap.Time("resume_from", resumeFrom))
+		}
+		r.searchCheckpoint = resumeFrom
+	} else {
+		r.searchCheckpoint = windowEnd
+	}
+	return nil
+}
+
+func maxIngestTimestamp(events []models.APIQueryJobsResultsEvents) (int64, bool) {
+	maxMillis := int64(0)
+	found := false
+	for _, event := range events {
+		fields, ok := event.(map[string]any)
+		if !ok {
+			continue
+		}
+		if millis, ok := epochMillis(fields["@ingesttimestamp"]); ok && millis > maxMillis {
+			maxMillis = millis
+			found = true
+		}
+	}
+	return maxMillis, found
+}
+
+// epochMillis reads an epoch-milliseconds value that may arrive as float64,
+// json.Number, or string depending on the JSON decoder in use.
+func epochMillis(v any) (int64, bool) {
+	switch n := v.(type) {
+	case float64:
+		return int64(n), true
+	case json.Number:
+		millis, err := n.Int64()
+		return millis, err == nil
+	case string:
+		millis, err := strconv.ParseInt(n, 10, 64)
+		return millis, err == nil
+	}
+	return 0, false
+}
+
 func (r *crowdstrikeReceiver) backOffOnRateLimit(ctx context.Context, limit, remaining int64) {
 	if remaining >= limit/10 {
 		return
@@ -182,6 +386,45 @@ func convertAlertToPlogLogs(alerts *alerts.GetV2OK) (*plog.Logs, error) {
 			lr.SetSeverityText(*alert.SeverityName)
 		}
 		// TODO: lr.SetSeverityNumber(...)
+	}
+
+	return &out, nil
+}
+
+func convertSearchEventsToPlogLogs(events []models.APIQueryJobsResultsEvents) (*plog.Logs, error) {
+	out := plog.NewLogs()
+	ills := out.ResourceLogs().AppendEmpty().ScopeLogs().AppendEmpty()
+	observed := pcommon.NewTimestampFromTime(time.Now())
+
+	for _, event := range events {
+		lr := ills.LogRecords().AppendEmpty()
+		lr.SetObservedTimestamp(observed)
+
+		fields, ok := event.(map[string]any)
+		if !ok {
+			// unexpected event shape: emit its JSON so nothing is dropped
+			raw, err := json.Marshal(event)
+			if err != nil {
+				return nil, err
+			}
+			lr.Body().SetStr(string(raw))
+			continue
+		}
+
+		if millis, ok := epochMillis(fields[timestampField]); ok {
+			lr.SetTimestamp(pcommon.NewTimestampFromTime(time.UnixMilli(millis)))
+		}
+		// @rawstring is the original log line as ingested — the natural body
+		// for downstream parsing; fall back to the whole event as JSON.
+		if raw, ok := fields["@rawstring"].(string); ok && raw != "" {
+			lr.Body().SetStr(raw)
+		} else {
+			raw, err := json.Marshal(fields)
+			if err != nil {
+				return nil, err
+			}
+			lr.Body().SetStr(string(raw))
+		}
 	}
 
 	return &out, nil

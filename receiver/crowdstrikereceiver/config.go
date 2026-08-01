@@ -9,6 +9,19 @@ import (
 	"go.opentelemetry.io/collector/config/configtls"
 )
 
+// NGSIEMSearchConfig configures pulling log events from an NG-SIEM repository
+// via the query-jobs API.
+type NGSIEMSearchConfig struct {
+	// Repository is the NG-SIEM repository (view) to query, e.g. "third-party".
+	// Setting it enables the NG-SIEM search poller.
+	Repository string `mapstructure:"repository"`
+
+	// QueryString is the CQL filter selecting the events to pull.
+	// Defaults to a match-all query. Aggregating functions must not be used
+	// here, as each matched event is emitted as one log record.
+	QueryString string `mapstructure:"query_string"`
+}
+
 type CrowdstrikeReceiverConfig struct {
 	// AccessToken is the access token used to access the CrowdStrike Falcon platform.
 	// If used, Cloud must be provided.
@@ -40,6 +53,12 @@ type CrowdstrikeReceiverConfig struct {
 	// InitialLookback bounds how far back the first poll reaches. Zero means
 	// only data arriving after the receiver starts is collected.
 	InitialLookback time.Duration `mapstructure:"initial_lookback"`
+
+	// DisableAlerts turns off the Alerts API poller.
+	DisableAlerts bool `mapstructure:"disable_alerts"`
+
+	// NGSIEMSearch enables pulling log events from an NG-SIEM repository.
+	NGSIEMSearch NGSIEMSearchConfig `mapstructure:"ngsiem_search"`
 
 	// Debug enables debug logging of all HTTP traffic going through the API runtime.
 	Debug bool `mapstructure:"debug"`
