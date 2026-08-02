@@ -32,7 +32,22 @@ const fqlTimestampLayout = "2006-01-02T15:04:05.000Z"
 // alertPageSize is how many not-yet-seen alerts a page asks for.
 const alertPageSize = 500
 
-const searchStatusPollInterval = time.Second
+// alertQueryMaxLimit is the largest limit QueryV2 accepts, and so the most
+// alerts that can share one millisecond and still all be collected.
+const alertQueryMaxLimit = 10000
+
+// The query-job status response carries a metaData.pollAfter hint telling us
+// when the server expects to have progressed; clamp it so a missing or absurd
+// hint can neither busy-loop the poller nor park it for minutes. searchMaxWait
+// bounds the whole job: a query that never reports done is abandoned (and
+// stopped) rather than pinning the poller forever.
+const (
+	searchStatusPollInterval = time.Second
+	searchStatusPollFloor    = 100 * time.Millisecond
+	searchStatusPollCeiling  = 10 * time.Second
+	searchMaxWait            = 10 * time.Minute
+	searchStopTimeout        = 15 * time.Second
+)
 
 // searchBatchLimit is the result-set size requested via an explicit
 // sort(limit=...); without it the server caps a query job at 200 events.
@@ -291,8 +306,12 @@ func (r *crowdstrikeReceiver) pollSearchOnce(ctx context.Context) error {
 		return errors.New("starting query job: response carried no job ID")
 	}
 	jobID := *startedPayload.ID
+	// A query job lives on server-side until it is stopped or expires; a
+	// receiver that only ever starts them leaks one per tick.
+	defer r.stopSearch(ctx, jobID)
 
 	var results *models.APIQueryJobsResults
+	deadline := time.Now().Add(searchMaxWait)
 	for {
 		status, err := r.client.Ngsiem.GetSearchStatusV1(ngsiem.NewGetSearchStatusV1Params().
 			WithContext(ctx).
@@ -308,10 +327,13 @@ func (r *crowdstrikeReceiver) pollSearchOnce(ctx context.Context) error {
 		if results.Done != nil && *results.Done {
 			break
 		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("query job %s did not complete within %s", jobID, searchMaxWait)
+		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(searchStatusPollInterval):
+		case <-time.After(searchStatusPollDelay(results)):
 		}
 	}
 
@@ -350,6 +372,30 @@ func (r *crowdstrikeReceiver) pollSearchOnce(ctx context.Context) error {
 		r.searchCheckpoint = windowEnd
 	}
 	return nil
+}
+
+// stopSearch releases the server-side query job. It runs on a context detached
+// from the poll one so shutdown still cleans up after itself.
+func (r *crowdstrikeReceiver) stopSearch(ctx context.Context, jobID string) {
+	stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), searchStopTimeout)
+	defer cancel()
+
+	if _, err := r.client.Ngsiem.StopSearchV1(ngsiem.NewStopSearchV1Params().
+		WithContext(stopCtx).
+		WithRepository(r.config.NGSIEMSearch.Repository).
+		WithID(jobID)); err != nil {
+		r.logger.Warn("stopping NG-SIEM query job failed, it will expire server-side",
+			zap.String("job_id", jobID), zap.Error(err))
+	}
+}
+
+// searchStatusPollDelay returns how long to wait before the next status poll,
+// preferring the server's own hint over a fixed interval.
+func searchStatusPollDelay(results *models.APIQueryJobsResults) time.Duration {
+	if results.MetaData == nil || results.MetaData.PollAfter == nil {
+		return searchStatusPollInterval
+	}
+	return min(max(time.Duration(*results.MetaData.PollAfter)*time.Millisecond, searchStatusPollFloor), searchStatusPollCeiling)
 }
 
 func maxIngestTimestamp(events []models.APIQueryJobsResultsEvents) (int64, bool) {
