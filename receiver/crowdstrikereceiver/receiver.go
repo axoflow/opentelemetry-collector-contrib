@@ -6,6 +6,7 @@ package crowdstrikereceiver // import "github.com/open-telemetry/opentelemetry-c
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"time"
@@ -141,7 +142,14 @@ func (r *crowdstrikeReceiver) pollAlertsOnce(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("querying alert IDs: %w", err)
 		}
-		ids := queried.GetPayload().Resources
+		// The swagger client leaves Payload nil for a body it cannot decode,
+		// so every payload access has to be guarded: a nil dereference here
+		// takes the whole collector down.
+		queriedPayload := queried.GetPayload()
+		if queriedPayload == nil {
+			return errors.New("querying alert IDs: response carried no payload")
+		}
+		ids := queriedPayload.Resources
 		if len(ids) == 0 {
 			return nil
 		}
@@ -155,8 +163,8 @@ func (r *crowdstrikeReceiver) pollAlertsOnce(ctx context.Context) error {
 
 		r.backOffOnRateLimit(ctx, fetched.XRateLimitLimit, fetched.XRateLimitRemaining)
 
-		if fetched.Payload == nil {
-			return nil
+		if fetched.GetPayload() == nil {
+			return fmt.Errorf("fetching alerts (trace_id %s): response carried no payload", fetched.XCSTRACEID)
 		}
 
 		logs, err := convertAlertToPlogLogs(fetched)
@@ -250,7 +258,11 @@ func (r *crowdstrikeReceiver) pollSearchOnce(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("starting query job: %w", err)
 	}
-	jobID := *started.GetPayload().ID
+	startedPayload := started.GetPayload()
+	if startedPayload == nil || startedPayload.ID == nil {
+		return errors.New("starting query job: response carried no job ID")
+	}
+	jobID := *startedPayload.ID
 
 	var results *models.APIQueryJobsResults
 	for {
@@ -262,6 +274,9 @@ func (r *crowdstrikeReceiver) pollSearchOnce(ctx context.Context) error {
 			return fmt.Errorf("polling query job %s: %w", jobID, err)
 		}
 		results = status.GetPayload()
+		if results == nil {
+			return fmt.Errorf("polling query job %s: response carried no payload", jobID)
+		}
 		if results.Done != nil && *results.Done {
 			break
 		}
