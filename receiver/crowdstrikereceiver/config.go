@@ -7,6 +7,7 @@ import (
 	"errors"
 	"time"
 
+	"go.opentelemetry.io/collector/config/configopaque"
 	"go.opentelemetry.io/collector/config/configtls"
 )
 
@@ -40,14 +41,14 @@ type Config struct {
 	// AccessToken is the access token used to access the CrowdStrike Falcon platform.
 	// If used, either Cloud or HostOverride must be provided.
 	// *required* if ClientID and ClientSecret are empty.
-	AccessToken string `mapstructure:"access_token"`
+	AccessToken configopaque.String `mapstructure:"access_token"`
 
 	// ClientID used for authentication with CrowdStrike Falcon platform.
 	// *required* if AccessToken is empty.
 	ClientID string `mapstructure:"client_id"`
 	// ClientSecret used for authentication with CrowdStrike Falcon platform.
 	// *required* if AccessToken is empty.
-	ClientSecret string `mapstructure:"client_secret"`
+	ClientSecret configopaque.String `mapstructure:"client_secret"`
 
 	// MemberCID is an optional CID selector for cases when the ClientID/ClientSecret
 	// has access to multiple CIDs.

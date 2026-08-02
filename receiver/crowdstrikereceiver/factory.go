@@ -104,11 +104,11 @@ func newCrowdstrikeReceiver(ctx context.Context, cfg *Config, consumer consumer.
 	// Use access token OR client credentials
 	if cfg.AccessToken != "" {
 		logger.Info("Using access token for authentication")
-		apiConfig.AccessToken = cfg.AccessToken
+		apiConfig.AccessToken = string(cfg.AccessToken)
 	} else {
 		logger.Info("Using client credentials for authentication")
 		apiConfig.ClientId = cfg.ClientID
-		apiConfig.ClientSecret = cfg.ClientSecret
+		apiConfig.ClientSecret = string(cfg.ClientSecret)
 	}
 
 	// Configure host override
