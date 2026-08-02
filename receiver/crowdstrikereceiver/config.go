@@ -7,6 +7,7 @@ import (
 	"errors"
 	"time"
 
+	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/config/configopaque"
 	"go.opentelemetry.io/collector/config/configtls"
 )
@@ -74,6 +75,11 @@ type Config struct {
 
 	// NGSIEMSearch enables pulling log events from an NG-SIEM repository.
 	NGSIEMSearch NGSIEMSearchConfig `mapstructure:"ngsiem_search"`
+
+	// StorageID points at a storage extension keeping the poll checkpoints
+	// across restarts. Without one they live in memory only, so a restart
+	// resumes from now-InitialLookback.
+	StorageID *component.ID `mapstructure:"storage"`
 
 	// Debug enables debug logging of all HTTP traffic going through the API runtime.
 	Debug bool `mapstructure:"debug"`

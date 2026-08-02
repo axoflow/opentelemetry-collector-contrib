@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/consumer/consumertest"
+	"go.opentelemetry.io/collector/extension/xextension/storage"
 	"go.uber.org/zap/zaptest"
 )
 
@@ -56,6 +57,7 @@ func newTestReceiver(t *testing.T, api falconAPI, next consumer.Logs) *crowdstri
 		nextConsumer: next,
 		config:       createDefaultConfig().(*Config),
 		api:          api,
+		checkpoints:  newCheckpointStore(storage.NewNopClient(), zaptest.NewLogger(t)),
 	}
 }
 

@@ -78,10 +78,12 @@ const (
 type crowdstrikeReceiver struct {
 	cancel       context.CancelFunc
 	wg           sync.WaitGroup
+	id           component.ID
 	logger       *zap.Logger
 	nextConsumer consumer.Logs
 	config       *Config
 	api          falconAPI
+	checkpoints  *checkpointStore
 
 	// alertCheckpoint is the highest updated_timestamp consumed so far;
 	// searchCheckpoint is the ingest-time lower bound of the next search
@@ -92,7 +94,8 @@ type crowdstrikeReceiver struct {
 }
 
 // Shutdown stops the pollers and waits for the in-flight poll — including its
-// ConsumeLogs call — to finish, so no records reach a torn-down pipeline.
+// ConsumeLogs call — to finish, so no records reach a torn-down pipeline and
+// the checkpoints are closed only once nothing can still write them.
 func (r *crowdstrikeReceiver) Shutdown(ctx context.Context) error {
 	if r.cancel == nil {
 		return nil
@@ -106,25 +109,31 @@ func (r *crowdstrikeReceiver) Shutdown(ctx context.Context) error {
 	}()
 	select {
 	case <-stopped:
-		return nil
+		return r.checkpoints.client.Close(ctx)
 	case <-ctx.Done():
 		return fmt.Errorf("waiting for CrowdStrike pollers to stop: %w", ctx.Err())
 	}
 }
 
-func (r *crowdstrikeReceiver) Start(_ context.Context, _ component.Host) error {
-	ctx, cancel := context.WithCancel(context.Background())
+func (r *crowdstrikeReceiver) Start(ctx context.Context, host component.Host) error {
+	client, err := getStorageClient(ctx, host, r.config.StorageID, r.id)
+	if err != nil {
+		return err
+	}
+	r.checkpoints = newCheckpointStore(client, r.logger)
+
+	fallback := time.Now().Add(-r.config.InitialLookback)
+	r.alertCheckpoint = r.checkpoints.load(ctx, alertCheckpointKey, fallback)
+	r.searchCheckpoint = r.checkpoints.load(ctx, searchCheckpointKey(r.config.NGSIEMSearch.Repository), fallback)
+
+	pollCtx, cancel := context.WithCancel(context.Background())
 	r.cancel = cancel
 
-	start := time.Now().Add(-r.config.InitialLookback)
-	r.alertCheckpoint = start
-	r.searchCheckpoint = start
-
 	if !r.config.DisableAlerts {
-		r.wg.Go(func() { r.poll(ctx, "alerts", r.pollAlertsOnce) })
+		r.wg.Go(func() { r.poll(pollCtx, "alerts", r.pollAlertsOnce) })
 	}
 	if r.config.NGSIEMSearch.Repository != "" {
-		r.wg.Go(func() { r.poll(ctx, "ngsiem_search", r.pollSearchOnce) })
+		r.wg.Go(func() { r.poll(pollCtx, "ngsiem_search", r.pollSearchOnce) })
 	}
 	return nil
 }
@@ -179,25 +188,30 @@ func (r *crowdstrikeReceiver) pollAlertsOnce(ctx context.Context) error {
 			return fmt.Errorf("consuming alerts: %w", err)
 		}
 
+		newest := pageStart
 		for _, alert := range page {
-			if alert.UpdatedTimestamp != nil && time.Time(*alert.UpdatedTimestamp).After(r.alertCheckpoint) {
-				r.alertCheckpoint = time.Time(*alert.UpdatedTimestamp)
+			if alert.UpdatedTimestamp != nil && time.Time(*alert.UpdatedTimestamp).After(newest) {
+				newest = time.Time(*alert.UpdatedTimestamp)
 			}
 		}
 
-		if len(page) < alertPageSize {
-			return nil
-		}
-		if !r.alertCheckpoint.After(pageStart) {
+		if len(page) == alertPageSize && !newest.After(pageStart) {
 			// A full page carrying no newer updated_timestamp — alerts
 			// missing the field, or more than alertPageSize of them sharing
 			// one millisecond — is requeried unchanged forever. Step past it
 			// and say what may have been lost.
-			r.alertCheckpoint = pageStart.Add(time.Millisecond)
+			newest = pageStart.Add(time.Millisecond)
 			r.logger.Warn("alert page did not advance the update checkpoint, stepping past it; "+
 				"alerts beyond the page limit in that millisecond are not collected",
 				zap.Time("updated_millisecond", pageStart),
 				zap.Int("page", len(page)))
+		}
+
+		r.alertCheckpoint = newest
+		r.checkpoints.save(ctx, alertCheckpointKey, newest)
+
+		if len(page) < alertPageSize {
+			return nil
 		}
 	}
 }
@@ -276,8 +290,9 @@ func (r *crowdstrikeReceiver) pollSearchOnce(ctx context.Context) error {
 	// resume from the newest consumed ingest timestamp so the next tick drains
 	// the remainder (events sharing that millisecond may be re-fetched),
 	// instead of skipping to windowEnd and silently dropping the backlog.
+	resumeFrom := windowEnd
 	if maxIngest, ok := maxIngestTimestamp(events); ok && len(events) == searchBatchLimit {
-		resumeFrom := time.UnixMilli(maxIngest)
+		resumeFrom = time.UnixMilli(maxIngest)
 		if !resumeFrom.After(r.searchCheckpoint) {
 			// Bulk-ingested events can share one @ingesttimestamp millisecond;
 			// when more than searchBatchLimit of them do, resuming from it
@@ -292,10 +307,10 @@ func (r *crowdstrikeReceiver) pollSearchOnce(ctx context.Context) error {
 				zap.Int("batch", len(events)),
 				zap.Time("resume_from", resumeFrom))
 		}
-		r.searchCheckpoint = resumeFrom
-	} else {
-		r.searchCheckpoint = windowEnd
 	}
+
+	r.searchCheckpoint = resumeFrom
+	r.checkpoints.save(ctx, searchCheckpointKey(r.config.NGSIEMSearch.Repository), resumeFrom)
 	return nil
 }
 

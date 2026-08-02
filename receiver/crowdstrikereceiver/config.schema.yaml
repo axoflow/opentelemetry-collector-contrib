@@ -49,6 +49,11 @@ properties:
     description: PollInterval specifies how often to poll the CrowdStrike API for new data.
     type: string
     format: duration
+  storage:
+    description: StorageID points at a storage extension keeping the poll checkpoints across restarts. Without one they live in memory only, so a restart resumes from now-InitialLookback.
+    x-pointer: true
+    type: string
+    x-customType: go.opentelemetry.io/collector/component.ID
   tls:
     description: TLS settings
     $ref: go.opentelemetry.io/collector/config/configtls.client_config

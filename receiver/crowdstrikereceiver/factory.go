@@ -124,6 +124,7 @@ func newCrowdstrikeReceiver(ctx context.Context, cfg *Config, consumer consumer.
 	logger.Info("CrowdStrike client created successfully")
 
 	return &crowdstrikeReceiver{
+		id:           settings.ID,
 		logger:       logger,
 		nextConsumer: consumer,
 		config:       cfg,

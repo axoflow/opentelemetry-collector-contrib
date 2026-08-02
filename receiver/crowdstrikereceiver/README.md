@@ -56,6 +56,7 @@ receivers:
 | `initial_lookback`   | duration | `0`     | How far back the first poll reaches. `0` collects only what arrives after the receiver starts.                               |
 | `disable_alerts`     | bool     | `false` | Turn the Alerts poller off, e.g. to collect NG-SIEM events only.                                                             |
 | `ngsiem_search`      | object   |         | NG-SIEM search poller settings. See below; the poller is off unless `repository` is set.                                     |
+| `storage`            | string   |         | ID of a storage extension keeping the checkpoints across restarts. Without it they live in memory only.                       |
 | `debug`              | bool     | `false` | Dump every API request and response, bodies included, to standard error. See the warning below.                              |
 | `tls`                | object   |         | Standard client TLS settings.                                                                                                |
 
@@ -88,8 +89,28 @@ whole event as JSON. `timeUnixNano` comes from `@timestamp`.
 Each poller keeps a checkpoint — the highest alert `updated_timestamp` and the
 NG-SIEM ingest-time window bound — and only advances it after the batch has
 been accepted by the next consumer, so a delivery failure is retried rather
-than skipped. The checkpoints live in memory: a restart resumes from
-`now - initial_lookback`.
+than skipped.
+
+Point `storage` at a storage extension to keep those checkpoints across
+collector restarts. Without one, a restart resumes from
+`now - initial_lookback`, which either loses everything ingested while the
+collector was down or re-delivers the whole lookback window. A missing or
+unreadable checkpoint is not fatal: the receiver logs it and falls back to
+`initial_lookback`.
+
+```yaml
+extensions:
+  file_storage:
+    directory: /var/lib/otelcol/storage
+
+receivers:
+  crowdstrike:
+    storage: file_storage
+    # ...
+
+service:
+  extensions: [file_storage]
+```
 
 ## Limitations
 
