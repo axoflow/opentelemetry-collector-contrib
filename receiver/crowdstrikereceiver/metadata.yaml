@@ -4,7 +4,7 @@ status:
   class: receiver
   stability:
     development: [logs]
-  distributions: [contrib]
+  distributions: []
   codeowners:
     active: [overorion]
   unsupported_platforms: []
