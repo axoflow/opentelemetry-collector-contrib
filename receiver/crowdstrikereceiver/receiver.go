@@ -83,9 +83,8 @@ type crowdstrikeReceiver struct {
 	wg           sync.WaitGroup
 	logger       *zap.Logger
 	nextConsumer consumer.Logs
-	config       *CrowdstrikeReceiverConfig
+	config       *Config
 	client       *client.CrowdStrikeAPISpecification
-	pollInterval time.Duration
 
 	// alertCheckpoint is the highest updated_timestamp consumed so far;
 	// searchCheckpoint is the ingest-time lower bound of the next search
@@ -134,7 +133,7 @@ func (r *crowdstrikeReceiver) Start(_ context.Context, _ component.Host) error {
 }
 
 func (r *crowdstrikeReceiver) poll(ctx context.Context, name string, once func(context.Context) error) {
-	ticker := time.NewTicker(r.pollInterval)
+	ticker := time.NewTicker(r.config.PollInterval)
 	defer ticker.Stop()
 
 	// The first poll goes out on start rather than an interval later: a
@@ -440,7 +439,7 @@ func (r *crowdstrikeReceiver) backOffOnRateLimit(ctx context.Context, limit, rem
 	)
 	select {
 	case <-ctx.Done():
-	case <-time.After(r.pollInterval * 2):
+	case <-time.After(r.config.PollInterval * 2):
 	}
 }
 

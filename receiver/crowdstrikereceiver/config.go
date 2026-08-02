@@ -10,8 +10,14 @@ import (
 	"go.opentelemetry.io/collector/config/configtls"
 )
 
+const defaultPollInterval = 30 * time.Second
+
+// defaultSearchQuery matches every event in the repository.
+const defaultSearchQuery = "*"
+
 var (
 	errNoCredentials    = errors.New("either access_token or both client_id and client_secret must be set")
+	errNoTokenHost      = errors.New("access_token needs either cloud or host_override: nothing in a token identifies the cloud, so it cannot be autodiscovered")
 	errNoPollInterval   = errors.New("poll_interval must be positive")
 	errNegativeLookback = errors.New("initial_lookback must not be negative")
 	errNoSource         = errors.New("nothing to collect: disable_alerts is set and ngsiem_search::repository is empty")
@@ -30,9 +36,9 @@ type NGSIEMSearchConfig struct {
 	QueryString string `mapstructure:"query_string"`
 }
 
-type CrowdstrikeReceiverConfig struct {
+type Config struct {
 	// AccessToken is the access token used to access the CrowdStrike Falcon platform.
-	// If used, Cloud must be provided.
+	// If used, either Cloud or HostOverride must be provided.
 	// *required* if ClientID and ClientSecret are empty.
 	AccessToken string `mapstructure:"access_token"`
 
@@ -56,7 +62,7 @@ type CrowdstrikeReceiverConfig struct {
 	BasePathOverride string `mapstructure:"base_path_override"`
 
 	// PollInterval specifies how often to poll the CrowdStrike API for new data.
-	PollInterval *time.Duration `mapstructure:"poll_interval"`
+	PollInterval time.Duration `mapstructure:"poll_interval"`
 
 	// InitialLookback bounds how far back the first poll reaches. Zero means
 	// only data arriving after the receiver starts is collected.
@@ -75,14 +81,19 @@ type CrowdstrikeReceiverConfig struct {
 	TLS configtls.ClientConfig `mapstructure:"tls,omitempty"`
 }
 
-func (c *CrowdstrikeReceiverConfig) Validate() error {
+func (c *Config) Validate() error {
 	var errs error
 	if c.AccessToken == "" && (c.ClientID == "" || c.ClientSecret == "") {
 		errs = errors.Join(errs, errNoCredentials)
 	}
+	// Client credentials can autodiscover the cloud, a token cannot: the SDK
+	// refuses to build a client for it, which would only surface at startup.
+	if c.AccessToken != "" && c.Cloud == "" && c.HostOverride == "" {
+		errs = errors.Join(errs, errNoTokenHost)
+	}
 	// A zero poll_interval would panic time.NewTicker rather than fail
 	// config validation.
-	if c.PollInterval != nil && *c.PollInterval <= 0 {
+	if c.PollInterval <= 0 {
 		errs = errors.Join(errs, errNoPollInterval)
 	}
 	if c.InitialLookback < 0 {

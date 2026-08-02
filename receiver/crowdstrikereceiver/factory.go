@@ -21,10 +21,6 @@ import (
 
 // NewFactory creates a factory for CrowdStrike receiver
 func NewFactory() receiver.Factory {
-	return newFactoryAdapter()
-}
-
-func newFactoryAdapter() receiver.Factory {
 	return receiver.NewFactory(
 		metadata.Type,
 		createDefaultConfig,
@@ -33,14 +29,17 @@ func newFactoryAdapter() receiver.Factory {
 }
 
 func createDefaultConfig() component.Config {
-	return &CrowdstrikeReceiverConfig{}
+	return &Config{
+		PollInterval: defaultPollInterval,
+		NGSIEMSearch: NGSIEMSearchConfig{QueryString: defaultSearchQuery},
+	}
 }
 
 func createLogsReceiver(ctx context.Context, settings receiver.Settings, cc component.Config, consumer consumer.Logs) (receiver.Logs, error) {
-	return newCrowdstrikeReceiver(ctx, cc.(*CrowdstrikeReceiverConfig), consumer, settings)
+	return newCrowdstrikeReceiver(ctx, cc.(*Config), consumer, settings)
 }
 
-func newCrowdstrikeReceiver(ctx context.Context, cfg *CrowdstrikeReceiverConfig, consumer consumer.Logs, settings receiver.Settings) (receiver.Logs, error) {
+func newCrowdstrikeReceiver(ctx context.Context, cfg *Config, consumer consumer.Logs, settings receiver.Settings) (receiver.Logs, error) {
 	logger := settings.Logger.With(zap.String("receiver", "crowdstrikereceiver"))
 
 	if cfg.TLS.InsecureSkipVerify {
@@ -128,17 +127,10 @@ func newCrowdstrikeReceiver(ctx context.Context, cfg *CrowdstrikeReceiverConfig,
 
 	logger.Info("CrowdStrike client created successfully")
 
-	// Determine poll interval
-	pollInterval := 30 * time.Second
-	if cfg.PollInterval != nil {
-		pollInterval = *cfg.PollInterval
-	}
-
 	return &crowdstrikeReceiver{
 		logger:       logger,
 		nextConsumer: consumer,
 		config:       cfg,
 		client:       client,
-		pollInterval: pollInterval,
 	}, nil
 }
