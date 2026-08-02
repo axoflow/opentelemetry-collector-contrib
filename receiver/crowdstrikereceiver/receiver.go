@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -346,6 +347,17 @@ func epochMillis(v any) (int64, bool) {
 	return 0, false
 }
 
+// falconSeverityNumbers maps severity_name — the API's own bucketing of the
+// 1..100 severity integer, observed as Informational 10, Low 30, Medium 50,
+// High 60..75, Critical 90 — onto the OTel severity scale.
+var falconSeverityNumbers = map[string]plog.SeverityNumber{
+	"informational": plog.SeverityNumberInfo,
+	"low":           plog.SeverityNumberWarn,
+	"medium":        plog.SeverityNumberWarn3,
+	"high":          plog.SeverityNumberError,
+	"critical":      plog.SeverityNumberFatal,
+}
+
 func convertAlertToPlogLogs(alerts []*models.DetectsAlert) (*plog.Logs, error) {
 	out := plog.NewLogs()
 	logs := out.ResourceLogs()
@@ -365,7 +377,9 @@ func convertAlertToPlogLogs(alerts []*models.DetectsAlert) (*plog.Logs, error) {
 		if err != nil {
 			return nil, err
 		}
-		err = lr.Attributes().FromRaw(rawMap)
+		// The alert is the payload, so it belongs in the body — the same place
+		// the NG-SIEM poller puts its events, and what downstream parsers read.
+		err = lr.Body().SetEmptyMap().FromRaw(rawMap)
 		if err != nil {
 			return nil, err
 		}
@@ -377,8 +391,10 @@ func convertAlertToPlogLogs(alerts []*models.DetectsAlert) (*plog.Logs, error) {
 		lr.SetObservedTimestamp(pcommon.NewTimestampFromTime(time.Now()))
 		if alert.SeverityName != nil {
 			lr.SetSeverityText(*alert.SeverityName)
+			if number, ok := falconSeverityNumbers[strings.ToLower(*alert.SeverityName)]; ok {
+				lr.SetSeverityNumber(number)
+			}
 		}
-		// TODO: lr.SetSeverityNumber(...)
 	}
 
 	return &out, nil

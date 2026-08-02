@@ -12,6 +12,7 @@ import (
 	"github.com/go-openapi/strfmt"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/plog"
 )
 
@@ -44,10 +45,38 @@ func TestConvertAlertToPlogLogs(t *testing.T) {
 	assert.Equal(t, "2026-08-02T18:14:05Z", lr.Timestamp().AsTime().Format(time.RFC3339))
 	assert.NotZero(t, lr.ObservedTimestamp())
 	assert.Equal(t, "Critical", lr.SeverityText())
+	assert.Equal(t, plog.SeverityNumberFatal, lr.SeverityNumber())
 
-	got, ok := lr.Attributes().Get("name")
+	require.Equal(t, pcommon.ValueTypeMap, lr.Body().Type())
+	got, ok := lr.Body().Map().Get("name")
 	require.True(t, ok)
 	assert.Equal(t, "Hidden HTTP Tunnel", got.Str())
+	assert.Equal(t, 0, lr.Attributes().Len())
+}
+
+func TestConvertAlertSeverityNumbers(t *testing.T) {
+	cases := []struct {
+		severityName string
+		expected     plog.SeverityNumber
+	}{
+		{"Informational", plog.SeverityNumberInfo},
+		{"Low", plog.SeverityNumberWarn},
+		{"Medium", plog.SeverityNumberWarn3},
+		{"High", plog.SeverityNumberError},
+		{"Critical", plog.SeverityNumberFatal},
+		{"Something New", plog.SeverityNumberUnspecified},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.severityName, func(t *testing.T) {
+			logs, err := convertAlertToPlogLogs([]*models.DetectsAlert{{SeverityName: &tc.severityName}})
+			require.NoError(t, err)
+
+			lr := onlyRecord(t, logs)
+			assert.Equal(t, tc.severityName, lr.SeverityText())
+			assert.Equal(t, tc.expected, lr.SeverityNumber())
+		})
+	}
 }
 
 // An alert without a timestamp still has to carry one, so the record is not
@@ -61,6 +90,7 @@ func TestConvertAlertToPlogLogsWithoutTimestamp(t *testing.T) {
 	lr := onlyRecord(t, logs)
 	assert.False(t, lr.Timestamp().AsTime().Before(before))
 	assert.Empty(t, lr.SeverityText())
+	assert.Equal(t, plog.SeverityNumberUnspecified, lr.SeverityNumber())
 }
 
 func TestConvertSearchEventsToPlogLogs(t *testing.T) {

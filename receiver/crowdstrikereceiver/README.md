@@ -76,9 +76,10 @@ receivers:
 
 ## Output
 
-**Alerts.** The alert JSON is flattened into the log record attributes.
-`timeUnixNano` comes from the alert `timestamp` and `severityText` from
-`severity_name`.
+**Alerts.** The alert JSON is the log record body, as a map. `timeUnixNano`
+comes from the alert `timestamp`, `severityText` from `severity_name`, and
+`severityNumber` from the same bucketing: Informational maps to `INFO`, Low to
+`WARN`, Medium to `WARN3`, High to `ERROR` and Critical to `FATAL`.
 
 **NG-SIEM events.** The body is the event's `@rawstring`, i.e. the original log
 line as ingested; events without one (attribute-only ingests) fall back to the
