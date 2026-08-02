@@ -4,9 +4,17 @@
 package crowdstrikereceiver // import "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/crowdstrikereceiver"
 
 import (
+	"errors"
 	"time"
 
 	"go.opentelemetry.io/collector/config/configtls"
+)
+
+var (
+	errNoCredentials    = errors.New("either access_token or both client_id and client_secret must be set")
+	errNoPollInterval   = errors.New("poll_interval must be positive")
+	errNegativeLookback = errors.New("initial_lookback must not be negative")
+	errNoSource         = errors.New("nothing to collect: disable_alerts is set and ngsiem_search::repository is empty")
 )
 
 // NGSIEMSearchConfig configures pulling log events from an NG-SIEM repository
@@ -65,4 +73,23 @@ type CrowdstrikeReceiverConfig struct {
 
 	// TLS settings
 	TLS configtls.ClientConfig `mapstructure:"tls,omitempty"`
+}
+
+func (c *CrowdstrikeReceiverConfig) Validate() error {
+	var errs error
+	if c.AccessToken == "" && (c.ClientID == "" || c.ClientSecret == "") {
+		errs = errors.Join(errs, errNoCredentials)
+	}
+	// A zero poll_interval would panic time.NewTicker rather than fail
+	// config validation.
+	if c.PollInterval != nil && *c.PollInterval <= 0 {
+		errs = errors.Join(errs, errNoPollInterval)
+	}
+	if c.InitialLookback < 0 {
+		errs = errors.Join(errs, errNegativeLookback)
+	}
+	if c.DisableAlerts && c.NGSIEMSearch.Repository == "" {
+		errs = errors.Join(errs, errNoSource)
+	}
+	return errs
 }
