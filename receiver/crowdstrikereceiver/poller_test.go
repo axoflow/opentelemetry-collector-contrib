@@ -6,6 +6,7 @@ package crowdstrikereceiver // import "github.com/open-telemetry/opentelemetry-c
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -16,7 +17,10 @@ import (
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/consumer/consumertest"
 	"go.opentelemetry.io/collector/extension/xextension/storage"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 // fakeAPI replays canned responses and records what the pollers asked for, so
@@ -242,6 +246,29 @@ func TestPollSearchStepsPastAStalledMillisecond(t *testing.T) {
 	assert.Equal(t, time.UnixMilli(stuck).Add(time.Millisecond), r.searchCheckpoint)
 }
 
+// A batch at the limit says the window was truncated, but without an
+// @ingesttimestamp there is nothing to resume from: the poller skips to the
+// window end, and has to say what that skipped.
+func TestPollSearchWarnsOnAFullBatchWithoutIngestTimestamps(t *testing.T) {
+	batch := make([]models.APIQueryJobsResultsEvents, searchBatchLimit)
+	for i := range batch {
+		batch[i] = map[string]any{"@id": fmt.Sprintf("event-%d", i), "@rawstring": "event"}
+	}
+	api := &fakeAPI{searchBatches: [][]models.APIQueryJobsResultsEvents{batch}}
+	r := newTestReceiver(t, api, consumertest.NewNop())
+	core, logs := observer.New(zapcore.WarnLevel)
+	r.logger = zap.New(core)
+	r.searchCheckpoint = time.Date(2026, 8, 2, 0, 0, 0, 0, time.UTC)
+
+	require.NoError(t, r.pollSearchOnce(t.Context()))
+
+	require.Len(t, api.searchEnds, 1)
+	assert.Equal(t, api.searchEnds[0], r.searchCheckpoint)
+	assert.Empty(t, r.searchBoundaryIDs)
+	require.Equal(t, 1, logs.Len())
+	assert.Contains(t, logs.All()[0].Message, "@ingesttimestamp")
+}
+
 func TestPollSearchKeepsCheckpointOnConsumeError(t *testing.T) {
 	api := &fakeAPI{searchBatches: [][]models.APIQueryJobsResultsEvents{searchBatch(1, 1754157245000)}}
 	r := newTestReceiver(t, api, consumertest.NewErr(errors.New("pipeline is down")))
@@ -250,4 +277,43 @@ func TestPollSearchKeepsCheckpointOnConsumeError(t *testing.T) {
 
 	require.Error(t, r.pollSearchOnce(t.Context()))
 	assert.Equal(t, start, r.searchCheckpoint)
+}
+
+// The ingest window is inclusive at its lower bound, so the events at the
+// checkpoint millisecond come back on the next poll; @id identifies them.
+func TestPollSearchDropsBoundaryDuplicates(t *testing.T) {
+	const boundary = int64(1754157245000)
+	atBoundary := func(id string) models.APIQueryJobsResultsEvents {
+		return map[string]any{"@id": id, "@ingesttimestamp": float64(boundary), "@rawstring": "event " + id}
+	}
+
+	// A first batch at the limit leaves the checkpoint on the boundary
+	// millisecond, then the second window returns those events again plus one
+	// new one.
+	first := searchBatch(searchBatchLimit-1, boundary)
+	first = append(first, atBoundary("a"))
+	second := []models.APIQueryJobsResultsEvents{
+		atBoundary("a"),
+		map[string]any{}, // an event without @id is never dropped
+		map[string]any{"@id": "b", "@ingesttimestamp": float64(boundary + 1), "@rawstring": "event b"},
+	}
+
+	api := &fakeAPI{searchBatches: [][]models.APIQueryJobsResultsEvents{first, second}}
+	sink := new(consumertest.LogsSink)
+	r := newTestReceiver(t, api, sink)
+	r.searchCheckpoint = time.UnixMilli(boundary - 1000)
+
+	require.NoError(t, r.pollSearchOnce(t.Context()))
+	require.Equal(t, time.UnixMilli(boundary), r.searchCheckpoint)
+	require.Len(t, sink.AllLogs(), 1)
+
+	require.NoError(t, r.pollSearchOnce(t.Context()))
+	require.Len(t, sink.AllLogs(), 2)
+
+	bodies := []string{}
+	lrs := sink.AllLogs()[1].ResourceLogs().At(0).ScopeLogs().At(0).LogRecords()
+	for i := 0; i < lrs.Len(); i++ {
+		bodies = append(bodies, lrs.At(i).Body().Str())
+	}
+	assert.ElementsMatch(t, []string{"{}", "event b"}, bodies)
 }

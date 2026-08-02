@@ -174,15 +174,16 @@ func TestEpochMillis(t *testing.T) {
 	}
 }
 
-func TestMaxIngestTimestamp(t *testing.T) {
+func TestIngestBoundary(t *testing.T) {
 	cases := []struct {
 		name     string
 		events   []models.APIQueryJobsResultsEvents
 		expected int64
+		ids      map[string]struct{}
 		ok       bool
 	}{
 		{
-			name: "highest of several",
+			name: "the highest millisecond and the ids sharing it",
 			events: []models.APIQueryJobsResultsEvents{
 				map[string]any{"@ingesttimestamp": json.Number("10"), "@id": "older"},
 				map[string]any{"@ingesttimestamp": json.Number("30"), "@id": "a"},
@@ -191,6 +192,7 @@ func TestMaxIngestTimestamp(t *testing.T) {
 				map[string]any{"@ingesttimestamp": json.Number("30")},
 			},
 			expected: 30,
+			ids:      map[string]struct{}{"a": {}, "c": {}},
 			ok:       true,
 		},
 		{
@@ -205,16 +207,17 @@ func TestMaxIngestTimestamp(t *testing.T) {
 		},
 		{
 			name:   "no timestamps at all",
-			events: []models.APIQueryJobsResultsEvents{map[string]any{"other": "value"}},
+			events: []models.APIQueryJobsResultsEvents{map[string]any{"other": "value", "@id": "a"}},
 		},
 		{name: "no events"},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			millis, ok := maxIngestTimestamp(tc.events)
+			millis, ids, ok := ingestBoundary(tc.events)
 			assert.Equal(t, tc.ok, ok)
 			assert.Equal(t, tc.expected, millis)
+			assert.Equal(t, tc.ids, ids)
 		})
 	}
 }

@@ -119,6 +119,13 @@ service:
 - `tls` settings are not applied to Falcon cloud autodiscovery, which the SDK
   performs over the process-default HTTP transport. Set `cloud` explicitly to
   avoid that request.
+- Boundary de-duplication is in memory only: a restart may re-deliver the
+  alerts updated, and the events ingested, in the checkpoint's millisecond.
+- An NG-SIEM search window ends 30 seconds behind the collector's clock, so
+  events are collected at least that late. The margin covers NG-SIEM's indexing
+  lag and clock skew against it: a window closed on the collector's own clock
+  is never queried again, and anything that became searchable after it closed
+  would be skipped.
 - An NG-SIEM search window is capped at 10,000 events per query job; a fuller
   window is drained across subsequent polls. More than 10,000 events sharing a
   single ingest millisecond cannot be drained and are reported in a warning.

@@ -92,6 +92,14 @@ type crowdstrikeReceiver struct {
 	// failed delivery is retried on the next tick.
 	alertCheckpoint  time.Time
 	searchCheckpoint time.Time
+
+	// alertBoundaryIDs holds the composite_id of the alerts already consumed
+	// at alertCheckpoint's millisecond, searchBoundaryIDs the @id of the
+	// events already consumed at searchCheckpoint's. Both filters are
+	// inclusive at their lower bound, so those are returned again by the next
+	// query.
+	alertBoundaryIDs  map[string]struct{}
+	searchBoundaryIDs map[string]struct{}
 }
 
 // Shutdown stops the pollers and waits for the in-flight poll — including its
@@ -173,7 +181,8 @@ func (r *crowdstrikeReceiver) pollAlertsOnce(ctx context.Context) error {
 	// is what keeps a tie straddling the page boundary from being skipped.
 	for {
 		pageStart := r.alertCheckpoint
-		page, err := r.api.fetchAlerts(ctx, pageStart, alertPageSize)
+		limit := min(alertPageSize+len(r.alertBoundaryIDs), alertQueryMaxLimit)
+		page, err := r.api.fetchAlerts(ctx, pageStart, limit)
 		if err != nil {
 			return err
 		}
@@ -199,13 +208,17 @@ func (r *crowdstrikeReceiver) pollAlertsOnce(ctx context.Context) error {
 				newest = time.Time(*alert.UpdatedTimestamp)
 			}
 		}
+		boundary := alertIDsAt(page, newest.UnixMilli())
 
-		if len(page) == alertPageSize && !newest.After(pageStart) {
-			// A full page carrying no newer updated_timestamp — alerts
-			// missing the field, or more than alertPageSize of them sharing
-			// one millisecond — is requeried unchanged forever. Step past it
-			// and say what may have been lost.
+		if len(page) >= limit && !newest.After(pageStart) && len(boundary) <= len(r.alertBoundaryIDs) {
+			// A full page that brought neither a newer updated_timestamp nor
+			// an alert not already seen at this millisecond cannot be
+			// drained: more than alertQueryMaxLimit of them share it, or the
+			// page carries no usable updated_timestamp at all. Either way it
+			// is requeried unchanged forever, so step past it and say what
+			// may have been lost.
 			newest = pageStart.Add(time.Millisecond)
+			boundary = nil
 			r.logger.Warn("alert page did not advance the update checkpoint, stepping past it; "+
 				"alerts beyond the page limit in that millisecond are not collected",
 				zap.Time("updated_millisecond", pageStart),
@@ -213,9 +226,10 @@ func (r *crowdstrikeReceiver) pollAlertsOnce(ctx context.Context) error {
 		}
 
 		r.alertCheckpoint = newest
+		r.alertBoundaryIDs = boundary
 		r.checkpoints.save(ctx, alertCheckpointKey, newest)
 
-		if len(page) < alertPageSize {
+		if len(page) < limit {
 			return nil
 		}
 	}
@@ -281,8 +295,17 @@ func (r *crowdstrikeReceiver) pollSearchOnce(ctx context.Context) error {
 		return err
 	}
 
-	if len(events) > 0 {
-		logs, err := convertSearchEventsToPlogLogs(events)
+	fresh := events
+	if len(r.searchBoundaryIDs) > 0 {
+		fresh = withoutSeen(events, r.searchBoundaryIDs)
+		if dropped := len(events) - len(fresh); dropped > 0 {
+			r.logger.Debug("dropped NG-SIEM events already consumed at the window boundary",
+				zap.Int("dropped", dropped))
+		}
+	}
+
+	if len(fresh) > 0 {
+		logs, err := convertSearchEventsToPlogLogs(fresh)
 		if err != nil {
 			return fmt.Errorf("converting query job events: %w", err)
 		}
@@ -295,10 +318,20 @@ func (r *crowdstrikeReceiver) pollSearchOnce(ctx context.Context) error {
 	// resume from the newest consumed ingest timestamp so the next tick drains
 	// the remainder (events sharing that millisecond may be re-fetched),
 	// instead of skipping to windowEnd and silently dropping the backlog.
+	newestIngest, newestIDs, hasIngest := ingestBoundary(events)
+
 	resumeFrom := windowEnd
-	if maxIngest, ok := maxIngestTimestamp(events); ok && len(events) == searchBatchLimit {
-		resumeFrom = time.UnixMilli(maxIngest)
-		if !resumeFrom.After(r.searchCheckpoint) {
+	if len(events) == searchBatchLimit {
+		switch {
+		case !hasIngest:
+			// Without an @ingesttimestamp there is nothing to resume from, so
+			// the rest of the window is skipped and the boundary duplicates of
+			// the next one go unrecognized. Only the query can cause this.
+			r.logger.Warn("NG-SIEM search filled the batch limit with events carrying no readable @ingesttimestamp, "+
+				"skipping to the window end; the backlog behind it is not collected and boundary duplicates are not "+
+				"recognized — keep @ingesttimestamp on the events query_string selects",
+				zap.Int("batch", len(events)))
+		case !time.UnixMilli(newestIngest).After(r.searchCheckpoint):
 			// Bulk-ingested events can share one @ingesttimestamp millisecond;
 			// when more than searchBatchLimit of them do, resuming from it
 			// cannot progress. Step past it and say what may have been lost.
@@ -307,7 +340,8 @@ func (r *crowdstrikeReceiver) pollSearchOnce(ctx context.Context) error {
 				"stepping past it; events beyond the batch limit in that millisecond are not collected",
 				zap.Time("ingest_millisecond", r.searchCheckpoint),
 				zap.Int("batch", len(events)))
-		} else {
+		default:
+			resumeFrom = time.UnixMilli(newestIngest)
 			r.logger.Info("NG-SIEM search window truncated at batch limit, draining backlog",
 				zap.Int("batch", len(events)),
 				zap.Time("resume_from", resumeFrom))
@@ -315,24 +349,71 @@ func (r *crowdstrikeReceiver) pollSearchOnce(ctx context.Context) error {
 	}
 
 	r.searchCheckpoint = resumeFrom
+	// The next window is inclusive at its lower bound, so it returns the events
+	// ingested in the resume millisecond again — but only when the poll resumed
+	// from the newest millisecond it saw. Stepping past that millisecond or
+	// skipping to the window end leaves nothing to recognize.
+	r.searchBoundaryIDs = nil
+	if hasIngest && resumeFrom.UnixMilli() == newestIngest {
+		r.searchBoundaryIDs = newestIDs
+	}
 	r.checkpoints.save(ctx, searchCheckpointKey(r.config.NGSIEMSearch.Repository), resumeFrom)
 	return nil
 }
 
-func maxIngestTimestamp(events []models.APIQueryJobsResultsEvents) (int64, bool) {
-	maxMillis := int64(0)
-	found := false
+// withoutSeen drops the events whose @id is in seen. Events without an @id are
+// kept: dropping them would be a guess.
+func withoutSeen(events []models.APIQueryJobsResultsEvents, seen map[string]struct{}) []models.APIQueryJobsResultsEvents {
+	fresh := make([]models.APIQueryJobsResultsEvents, 0, len(events))
 	for _, event := range events {
-		fields, ok := event.(map[string]any)
-		if !ok {
+		if id, ok := eventID(event); ok {
+			if _, dup := seen[id]; dup {
+				continue
+			}
+		}
+		fresh = append(fresh, event)
+	}
+	return fresh
+}
+
+func eventID(event models.APIQueryJobsResultsEvents) (string, bool) {
+	fields, ok := event.(map[string]any)
+	if !ok {
+		return "", false
+	}
+	id, ok := fields[eventIDField].(string)
+	return id, ok && id != ""
+}
+
+// ingestBoundary walks a batch once for the two things the checkpoint needs
+// from it: the newest @ingesttimestamp any event carries, and the @id of every
+// event sharing that millisecond. It reports whether any event carried one at
+// all.
+func ingestBoundary(events []models.APIQueryJobsResultsEvents) (int64, map[string]struct{}, bool) {
+	var (
+		newest int64
+		ids    map[string]struct{}
+	)
+	for _, event := range events {
+		fields, isMap := event.(map[string]any)
+		if !isMap {
 			continue
 		}
-		if millis, ok := epochMillis(fields["@ingesttimestamp"]); ok && millis > maxMillis {
-			maxMillis = millis
-			found = true
+		millis, found := epochMillis(fields[ingestTimestampField])
+		if !found || millis < newest {
+			continue
+		}
+		if millis > newest {
+			newest, ids = millis, nil
+		}
+		if id, hasID := eventID(event); hasID {
+			if ids == nil {
+				ids = make(map[string]struct{})
+			}
+			ids[id] = struct{}{}
 		}
 	}
-	return maxMillis, found
+	return newest, ids, newest > 0
 }
 
 // epochMillis reads an epoch-milliseconds value that may arrive as float64,
