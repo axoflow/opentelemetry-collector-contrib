@@ -5,18 +5,18 @@ package crowdstrikereceiver // import "github.com/open-telemetry/opentelemetry-c
 
 import (
 	"context"
-	"crypto/tls"
 	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/crowdstrike/gofalcon/falcon"
-	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/crowdstrikereceiver/internal/metadata"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/receiver"
 	"go.uber.org/zap"
 	"golang.org/x/oauth2"
+
+	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/crowdstrikereceiver/internal/metadata"
 )
 
 // NewFactory creates a factory for CrowdStrike receiver
@@ -46,7 +46,6 @@ func newCrowdstrikeReceiver(ctx context.Context, cfg *Config, consumer consumer.
 		logger.Warn("TLS certificate verification is DISABLED")
 	}
 
-	var tlsConfig *tls.Config
 	tlsConfig, err := cfg.TLS.LoadTLSConfig(ctx)
 	if err != nil {
 		logger.Error("Failed to load TLS configuration", zap.Error(err))
@@ -83,13 +82,12 @@ func newCrowdstrikeReceiver(ctx context.Context, cfg *Config, consumer consumer.
 	}
 
 	// Determine cloud type
-	var cloudType falcon.CloudType = falcon.CloudAutoDiscover
+	cloudType := falcon.CloudType(falcon.CloudAutoDiscover)
 	if cfg.Cloud != "" {
-		c, err := falcon.CloudValidate(cfg.Cloud)
+		cloudType, err = falcon.CloudValidate(cfg.Cloud)
 		if err != nil {
 			return nil, err
 		}
-		cloudType = c
 	}
 
 	// Build API config
@@ -114,9 +112,7 @@ func newCrowdstrikeReceiver(ctx context.Context, cfg *Config, consumer consumer.
 	// Configure host override
 	if cfg.HostOverride != "" {
 		apiConfig.HostOverride = cfg.HostOverride
-
 		logger.Info("Using host override", zap.String("host", cfg.HostOverride))
-
 	}
 
 	client, err := falcon.NewClient(apiConfig)

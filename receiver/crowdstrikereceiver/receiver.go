@@ -452,16 +452,18 @@ func convertAlertToPlogLogs(alerts *alerts.GetV2OK) (*plog.Logs, error) {
 	for _, alert := range alerts.Payload.Resources {
 		lr := ills.LogRecords().AppendEmpty()
 
-		jsonMap, err := json.Marshal(alert)
+		encoded, err := json.Marshal(alert)
 		if err != nil {
 			return nil, err
 		}
 
 		var rawMap map[string]any
-		if err := json.Unmarshal(jsonMap, &rawMap); err != nil {
+		err = json.Unmarshal(encoded, &rawMap)
+		if err != nil {
 			return nil, err
 		}
-		if err = lr.Attributes().FromRaw(rawMap); err != nil {
+		err = lr.Attributes().FromRaw(rawMap)
+		if err != nil {
 			return nil, err
 		}
 		ts := time.Now()
