@@ -6,6 +6,7 @@ package crowdstrikereceiver // import "github.com/open-telemetry/opentelemetry-c
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -21,6 +22,7 @@ import (
 // fakeAPI replays canned responses and records what the pollers asked for, so
 // the checkpoint arithmetic can be asserted without the CrowdStrike API.
 type fakeAPI struct {
+	mu         sync.Mutex
 	alertPages [][]*models.DetectsAlert
 	alertSince []time.Time
 
@@ -30,6 +32,9 @@ type fakeAPI struct {
 }
 
 func (f *fakeAPI) fetchAlerts(_ context.Context, since time.Time, _ int) ([]*models.DetectsAlert, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
 	f.alertSince = append(f.alertSince, since)
 	if len(f.alertPages) == 0 {
 		return nil, nil
@@ -40,6 +45,9 @@ func (f *fakeAPI) fetchAlerts(_ context.Context, since time.Time, _ int) ([]*mod
 }
 
 func (f *fakeAPI) runSearch(_ context.Context, start, end time.Time) ([]models.APIQueryJobsResultsEvents, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
 	f.searchStarts = append(f.searchStarts, start)
 	f.searchEnds = append(f.searchEnds, end)
 	if len(f.searchBatches) == 0 {
@@ -48,6 +56,23 @@ func (f *fakeAPI) runSearch(_ context.Context, start, end time.Time) ([]models.A
 	batch := f.searchBatches[0]
 	f.searchBatches = f.searchBatches[1:]
 	return batch, nil
+}
+
+// since and starts report the window bounds the two pollers asked for. The
+// tests that drive a poller through Start read them while its goroutine is
+// still running, so those reads go through the mutex; a test calling
+// pollAlertsOnce or pollSearchOnce itself is the fake's only goroutine and
+// reads the recorded slices directly.
+func (f *fakeAPI) since() []time.Time {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]time.Time(nil), f.alertSince...)
+}
+
+func (f *fakeAPI) starts() []time.Time {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]time.Time(nil), f.searchStarts...)
 }
 
 func newTestReceiver(t *testing.T, api falconAPI, next consumer.Logs) *crowdstrikeReceiver {

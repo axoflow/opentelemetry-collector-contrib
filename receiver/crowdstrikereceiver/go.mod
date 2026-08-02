@@ -5,6 +5,7 @@ go 1.25.0
 require (
 	github.com/crowdstrike/gofalcon v0.18.0
 	github.com/go-openapi/strfmt v0.22.2
+	github.com/open-telemetry/opentelemetry-collector-contrib/extension/storage v0.156.0
 	github.com/stretchr/testify v1.11.1
 	go.opentelemetry.io/collector/component v1.62.0
 	go.opentelemetry.io/collector/component/componenttest v0.156.0
@@ -86,3 +87,5 @@ require (
 	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
+
+replace github.com/open-telemetry/opentelemetry-collector-contrib/extension/storage => ../../extension/storage
