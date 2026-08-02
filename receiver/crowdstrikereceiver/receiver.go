@@ -6,15 +6,12 @@ package crowdstrikereceiver // import "github.com/open-telemetry/opentelemetry-c
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
 
-	"github.com/crowdstrike/gofalcon/falcon/client"
-	"github.com/crowdstrike/gofalcon/falcon/client/alerts"
-	"github.com/crowdstrike/gofalcon/falcon/client/ngsiem"
 	"github.com/crowdstrike/gofalcon/falcon/models"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer"
@@ -84,7 +81,7 @@ type crowdstrikeReceiver struct {
 	logger       *zap.Logger
 	nextConsumer consumer.Logs
 	config       *Config
-	client       *client.CrowdStrikeAPISpecification
+	api          falconAPI
 
 	// alertCheckpoint is the highest updated_timestamp consumed so far;
 	// searchCheckpoint is the ingest-time lower bound of the next search
@@ -162,57 +159,33 @@ func (r *crowdstrikeReceiver) pollAlertsOnce(ctx context.Context) error {
 	// is what keeps a tie straddling the page boundary from being skipped.
 	for {
 		pageStart := r.alertCheckpoint
-		filter := fmt.Sprintf("updated_timestamp:>'%s'", pageStart.UTC().Format(fqlTimestampLayout))
-		sort := "updated_timestamp|asc"
-		limit := int64(alertPageSize)
-		queried, err := r.client.Alerts.QueryV2(alerts.NewQueryV2Params().
-			WithContext(ctx).
-			WithFilter(&filter).
-			WithSort(&sort).
-			WithLimit(&limit))
+		page, err := r.api.fetchAlerts(ctx, pageStart, alertPageSize)
 		if err != nil {
-			return fmt.Errorf("querying alert IDs: %w", err)
+			return err
 		}
-		// The swagger client leaves Payload nil for a body it cannot decode,
-		// so every payload access has to be guarded: a nil dereference here
-		// takes the whole collector down.
-		queriedPayload := queried.GetPayload()
-		if queriedPayload == nil {
-			return errors.New("querying alert IDs: response carried no payload")
-		}
-		ids := queriedPayload.Resources
-		if len(ids) == 0 {
+		// resources[] can carry a JSON null. It says nothing about an alert,
+		// and every read below would dereference it — in a poll goroutine,
+		// which takes the whole collector with it.
+		page = slices.DeleteFunc(page, func(alert *models.DetectsAlert) bool { return alert == nil })
+		if len(page) == 0 {
 			return nil
 		}
 
-		fetched, err := r.client.Alerts.GetV2(alerts.NewGetV2Params().
-			WithContext(ctx).
-			WithBody(&models.DetectsapiPostEntitiesAlertsV2Request{CompositeIds: ids}))
+		logs, err := convertAlertToPlogLogs(page)
 		if err != nil {
-			return fmt.Errorf("fetching alerts: %w", err)
-		}
-
-		r.backOffOnRateLimit(ctx, fetched.XRateLimitLimit, fetched.XRateLimitRemaining)
-
-		if fetched.GetPayload() == nil {
-			return fmt.Errorf("fetching alerts (trace_id %s): response carried no payload", fetched.XCSTRACEID)
-		}
-
-		logs, err := convertAlertToPlogLogs(fetched)
-		if err != nil {
-			return fmt.Errorf("converting alerts (trace_id %s): %w", fetched.XCSTRACEID, err)
+			return fmt.Errorf("converting alerts: %w", err)
 		}
 		if err := r.nextConsumer.ConsumeLogs(ctx, *logs); err != nil {
-			return fmt.Errorf("consuming alerts (trace_id %s): %w", fetched.XCSTRACEID, err)
+			return fmt.Errorf("consuming alerts: %w", err)
 		}
 
-		for _, alert := range fetched.Payload.Resources {
+		for _, alert := range page {
 			if alert.UpdatedTimestamp != nil && time.Time(*alert.UpdatedTimestamp).After(r.alertCheckpoint) {
 				r.alertCheckpoint = time.Time(*alert.UpdatedTimestamp)
 			}
 		}
 
-		if len(ids) < alertPageSize {
+		if len(page) < alertPageSize {
 			return nil
 		}
 		if !r.alertCheckpoint.After(pageStart) {
@@ -224,7 +197,7 @@ func (r *crowdstrikeReceiver) pollAlertsOnce(ctx context.Context) error {
 			r.logger.Warn("alert page did not advance the update checkpoint, stepping past it; "+
 				"alerts beyond the page limit in that millisecond are not collected",
 				zap.Time("updated_millisecond", pageStart),
-				zap.Int("page", len(ids)))
+				zap.Int("page", len(page)))
 		}
 	}
 }
@@ -284,65 +257,18 @@ func (r *crowdstrikeReceiver) pollSearchOnce(ctx context.Context) error {
 		return nil
 	}
 
-	query := r.config.NGSIEMSearch.QueryString
-	if query == "" {
-		query = "*"
-	}
-	query = fmt.Sprintf("%s | sort(@ingesttimestamp, order=asc, limit=%d)", query, searchBatchLimit)
-	started, err := r.client.Ngsiem.StartSearchV1(ngsiem.NewStartSearchV1Params().
-		WithContext(ctx).
-		WithRepository(r.config.NGSIEMSearch.Repository).
-		WithBody(&models.APIQueryJobInput{
-			QueryString: &query,
-			IngestStart: strconv.FormatInt(r.searchCheckpoint.UnixMilli(), 10),
-			IngestEnd:   strconv.FormatInt(windowEnd.UnixMilli(), 10),
-		}))
+	events, err := r.api.runSearch(ctx, r.searchCheckpoint, windowEnd)
 	if err != nil {
-		return fmt.Errorf("starting query job: %w", err)
-	}
-	startedPayload := started.GetPayload()
-	if startedPayload == nil || startedPayload.ID == nil {
-		return errors.New("starting query job: response carried no job ID")
-	}
-	jobID := *startedPayload.ID
-	// A query job lives on server-side until it is stopped or expires; a
-	// receiver that only ever starts them leaks one per tick.
-	defer r.stopSearch(ctx, jobID)
-
-	var results *models.APIQueryJobsResults
-	deadline := time.Now().Add(searchMaxWait)
-	for {
-		status, err := r.client.Ngsiem.GetSearchStatusV1(ngsiem.NewGetSearchStatusV1Params().
-			WithContext(ctx).
-			WithRepository(r.config.NGSIEMSearch.Repository).
-			WithID(jobID))
-		if err != nil {
-			return fmt.Errorf("polling query job %s: %w", jobID, err)
-		}
-		results = status.GetPayload()
-		if results == nil {
-			return fmt.Errorf("polling query job %s: response carried no payload", jobID)
-		}
-		if results.Done != nil && *results.Done {
-			break
-		}
-		if time.Now().After(deadline) {
-			return fmt.Errorf("query job %s did not complete within %s", jobID, searchMaxWait)
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(searchStatusPollDelay(results)):
-		}
+		return err
 	}
 
-	if len(results.Events) > 0 {
-		logs, err := convertSearchEventsToPlogLogs(results.Events)
+	if len(events) > 0 {
+		logs, err := convertSearchEventsToPlogLogs(events)
 		if err != nil {
-			return fmt.Errorf("converting query job %s events: %w", jobID, err)
+			return fmt.Errorf("converting query job events: %w", err)
 		}
 		if err := r.nextConsumer.ConsumeLogs(ctx, *logs); err != nil {
-			return fmt.Errorf("consuming query job %s events: %w", jobID, err)
+			return fmt.Errorf("consuming query job events: %w", err)
 		}
 	}
 
@@ -350,7 +276,7 @@ func (r *crowdstrikeReceiver) pollSearchOnce(ctx context.Context) error {
 	// resume from the newest consumed ingest timestamp so the next tick drains
 	// the remainder (events sharing that millisecond may be re-fetched),
 	// instead of skipping to windowEnd and silently dropping the backlog.
-	if maxIngest, ok := maxIngestTimestamp(results.Events); ok && len(results.Events) == searchBatchLimit {
+	if maxIngest, ok := maxIngestTimestamp(events); ok && len(events) == searchBatchLimit {
 		resumeFrom := time.UnixMilli(maxIngest)
 		if !resumeFrom.After(r.searchCheckpoint) {
 			// Bulk-ingested events can share one @ingesttimestamp millisecond;
@@ -360,10 +286,10 @@ func (r *crowdstrikeReceiver) pollSearchOnce(ctx context.Context) error {
 			r.logger.Warn("NG-SIEM search stuck on one ingest millisecond holding more events than the batch limit, "+
 				"stepping past it; events beyond the batch limit in that millisecond are not collected",
 				zap.Time("ingest_millisecond", r.searchCheckpoint),
-				zap.Int("batch", len(results.Events)))
+				zap.Int("batch", len(events)))
 		} else {
 			r.logger.Info("NG-SIEM search window truncated at batch limit, draining backlog",
-				zap.Int("batch", len(results.Events)),
+				zap.Int("batch", len(events)),
 				zap.Time("resume_from", resumeFrom))
 		}
 		r.searchCheckpoint = resumeFrom
@@ -371,30 +297,6 @@ func (r *crowdstrikeReceiver) pollSearchOnce(ctx context.Context) error {
 		r.searchCheckpoint = windowEnd
 	}
 	return nil
-}
-
-// stopSearch releases the server-side query job. It runs on a context detached
-// from the poll one so shutdown still cleans up after itself.
-func (r *crowdstrikeReceiver) stopSearch(ctx context.Context, jobID string) {
-	stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), searchStopTimeout)
-	defer cancel()
-
-	if _, err := r.client.Ngsiem.StopSearchV1(ngsiem.NewStopSearchV1Params().
-		WithContext(stopCtx).
-		WithRepository(r.config.NGSIEMSearch.Repository).
-		WithID(jobID)); err != nil {
-		r.logger.Warn("stopping NG-SIEM query job failed, it will expire server-side",
-			zap.String("job_id", jobID), zap.Error(err))
-	}
-}
-
-// searchStatusPollDelay returns how long to wait before the next status poll,
-// preferring the server's own hint over a fixed interval.
-func searchStatusPollDelay(results *models.APIQueryJobsResults) time.Duration {
-	if results.MetaData == nil || results.MetaData.PollAfter == nil {
-		return searchStatusPollInterval
-	}
-	return min(max(time.Duration(*results.MetaData.PollAfter)*time.Millisecond, searchStatusPollFloor), searchStatusPollCeiling)
 }
 
 func maxIngestTimestamp(events []models.APIQueryJobsResultsEvents) (int64, bool) {
@@ -429,27 +331,13 @@ func epochMillis(v any) (int64, bool) {
 	return 0, false
 }
 
-func (r *crowdstrikeReceiver) backOffOnRateLimit(ctx context.Context, limit, remaining int64) {
-	if remaining >= limit/10 {
-		return
-	}
-	r.logger.Warn("CrowdStrike API rate limit nearly exhausted, backing off",
-		zap.Int64("remaining", remaining),
-		zap.Int64("limit", limit),
-	)
-	select {
-	case <-ctx.Done():
-	case <-time.After(r.config.PollInterval * 2):
-	}
-}
-
-func convertAlertToPlogLogs(alerts *alerts.GetV2OK) (*plog.Logs, error) {
+func convertAlertToPlogLogs(alerts []*models.DetectsAlert) (*plog.Logs, error) {
 	out := plog.NewLogs()
 	logs := out.ResourceLogs()
 	rls := logs.AppendEmpty()
 	ills := rls.ScopeLogs().AppendEmpty()
 
-	for _, alert := range alerts.Payload.Resources {
+	for _, alert := range alerts {
 		lr := ills.LogRecords().AppendEmpty()
 
 		encoded, err := json.Marshal(alert)

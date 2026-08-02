@@ -127,6 +127,11 @@ func newCrowdstrikeReceiver(ctx context.Context, cfg *Config, consumer consumer.
 		logger:       logger,
 		nextConsumer: consumer,
 		config:       cfg,
-		client:       client,
+		api: &gofalconAPI{
+			client:     client,
+			logger:     logger,
+			repository: cfg.NGSIEMSearch.Repository,
+			query:      cfg.NGSIEMSearch.QueryString,
+		},
 	}, nil
 }

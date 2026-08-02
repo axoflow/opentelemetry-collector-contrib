@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/crowdstrike/gofalcon/falcon/client/alerts"
 	"github.com/crowdstrike/gofalcon/falcon/models"
 	"github.com/go-openapi/strfmt"
 	"github.com/stretchr/testify/assert"
@@ -24,12 +23,6 @@ func dateTime(t *testing.T, value string) *strfmt.DateTime {
 	return &converted
 }
 
-func alertsResponse(resources ...*models.DetectsAlert) *alerts.GetV2OK {
-	return &alerts.GetV2OK{
-		Payload: &models.DetectsapiPostEntitiesAlertsV2Response{Resources: resources},
-	}
-}
-
 func onlyRecord(t *testing.T, logs *plog.Logs) plog.LogRecord {
 	t.Helper()
 	require.Equal(t, 1, logs.LogRecordCount())
@@ -40,11 +33,11 @@ func TestConvertAlertToPlogLogs(t *testing.T) {
 	name := "Hidden HTTP Tunnel"
 	severityName := "Critical"
 
-	logs, err := convertAlertToPlogLogs(alertsResponse(&models.DetectsAlert{
+	logs, err := convertAlertToPlogLogs([]*models.DetectsAlert{{
 		Name:         &name,
 		SeverityName: &severityName,
 		Timestamp:    dateTime(t, "2026-08-02T18:14:05Z"),
-	}))
+	}})
 	require.NoError(t, err)
 
 	lr := onlyRecord(t, logs)
@@ -62,7 +55,7 @@ func TestConvertAlertToPlogLogs(t *testing.T) {
 func TestConvertAlertToPlogLogsWithoutTimestamp(t *testing.T) {
 	before := time.Now()
 
-	logs, err := convertAlertToPlogLogs(alertsResponse(&models.DetectsAlert{}))
+	logs, err := convertAlertToPlogLogs([]*models.DetectsAlert{{}})
 	require.NoError(t, err)
 
 	lr := onlyRecord(t, logs)
