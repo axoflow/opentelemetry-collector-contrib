@@ -68,15 +68,20 @@ func newCrowdstrikeReceiver(ctx context.Context, cfg *CrowdstrikeReceiverConfig,
 		Timeout:   5 * time.Minute,
 	}
 
-	// Inject HTTP client into context for OAuth2
+	// Inject HTTP client into context for OAuth2. gofalcon builds the API
+	// client's transport on top of this one, so the TLS settings reach every
+	// API call without touching the process-global http.DefaultTransport,
+	// which races with any other component constructing an HTTP client.
 	ctx = context.WithValue(ctx, oauth2.HTTPClient, customHTTPClient)
 
-	// Temporarily set as default transport during client creation
-	originalDefaultTransport := http.DefaultTransport
-	http.DefaultTransport = customTransport
-	defer func() {
-		http.DefaultTransport = originalDefaultTransport
-	}()
+	// The one request that transport does not cover is gofalcon's cloud
+	// autodiscovery, which goes through http.DefaultTransport internally. It
+	// only matters when the settings change trust or client identity.
+	customTLS := cfg.TLS.InsecureSkipVerify || cfg.TLS.CAFile != "" || cfg.TLS.CAPem != "" ||
+		cfg.TLS.CertFile != "" || cfg.TLS.CertPem != "" || cfg.TLS.KeyFile != "" || cfg.TLS.KeyPem != ""
+	if customTLS && cfg.Cloud == "" && cfg.HostOverride == "" {
+		logger.Warn("tls settings do not apply to Falcon cloud autodiscovery; set cloud explicitly to skip that request")
+	}
 
 	// Determine cloud type
 	var cloudType falcon.CloudType = falcon.CloudAutoDiscover
