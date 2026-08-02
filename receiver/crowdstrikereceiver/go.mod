@@ -4,6 +4,7 @@ go 1.25.0
 
 require (
 	github.com/crowdstrike/gofalcon v0.18.0
+	github.com/go-openapi/strfmt v0.22.2
 	github.com/stretchr/testify v1.11.1
 	go.opentelemetry.io/collector/component v1.62.0
 	go.opentelemetry.io/collector/component/componenttest v0.156.0
@@ -37,7 +38,6 @@ require (
 	github.com/go-openapi/loads v0.21.5 // indirect
 	github.com/go-openapi/runtime v0.27.1 // indirect
 	github.com/go-openapi/spec v0.20.14 // indirect
-	github.com/go-openapi/strfmt v0.22.2 // indirect
 	github.com/go-openapi/swag v0.22.9 // indirect
 	github.com/go-openapi/validate v0.23.1 // indirect
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
