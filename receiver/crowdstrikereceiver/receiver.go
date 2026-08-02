@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/crowdstrike/gofalcon/falcon/client"
@@ -64,6 +65,7 @@ const (
 
 type crowdstrikeReceiver struct {
 	cancel       context.CancelFunc
+	wg           sync.WaitGroup
 	logger       *zap.Logger
 	nextConsumer consumer.Logs
 	config       *CrowdstrikeReceiverConfig
@@ -78,11 +80,25 @@ type crowdstrikeReceiver struct {
 	searchCheckpoint time.Time
 }
 
-func (r *crowdstrikeReceiver) Shutdown(_ context.Context) error {
-	if r.cancel != nil {
-		r.cancel()
+// Shutdown stops the pollers and waits for the in-flight poll — including its
+// ConsumeLogs call — to finish, so no records reach a torn-down pipeline.
+func (r *crowdstrikeReceiver) Shutdown(ctx context.Context) error {
+	if r.cancel == nil {
+		return nil
 	}
-	return nil
+	r.cancel()
+
+	stopped := make(chan struct{})
+	go func() {
+		r.wg.Wait()
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("waiting for CrowdStrike pollers to stop: %w", ctx.Err())
+	}
 }
 
 func (r *crowdstrikeReceiver) Start(_ context.Context, _ component.Host) error {
@@ -94,10 +110,10 @@ func (r *crowdstrikeReceiver) Start(_ context.Context, _ component.Host) error {
 	r.searchCheckpoint = start
 
 	if !r.config.DisableAlerts {
-		go r.poll(ctx, "alerts", r.pollAlertsOnce)
+		r.wg.Go(func() { r.poll(ctx, "alerts", r.pollAlertsOnce) })
 	}
 	if r.config.NGSIEMSearch.Repository != "" {
-		go r.poll(ctx, "ngsiem_search", r.pollSearchOnce)
+		r.wg.Go(func() { r.poll(ctx, "ngsiem_search", r.pollSearchOnce) })
 	}
 	return nil
 }
