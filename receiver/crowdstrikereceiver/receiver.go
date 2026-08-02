@@ -131,7 +131,8 @@ func (r *crowdstrikeReceiver) pollAlertsOnce(ctx context.Context) error {
 	// composite_id and the page budget is widened to make room for them, which
 	// is what keeps a tie straddling the page boundary from being skipped.
 	for {
-		filter := fmt.Sprintf("updated_timestamp:>'%s'", r.alertCheckpoint.UTC().Format(fqlTimestampLayout))
+		pageStart := r.alertCheckpoint
+		filter := fmt.Sprintf("updated_timestamp:>'%s'", pageStart.UTC().Format(fqlTimestampLayout))
 		sort := "updated_timestamp|asc"
 		limit := int64(alertPageSize)
 		queried, err := r.client.Alerts.QueryV2(alerts.NewQueryV2Params().
@@ -183,6 +184,17 @@ func (r *crowdstrikeReceiver) pollAlertsOnce(ctx context.Context) error {
 
 		if len(ids) < alertPageSize {
 			return nil
+		}
+		if !r.alertCheckpoint.After(pageStart) {
+			// A full page carrying no newer updated_timestamp — alerts
+			// missing the field, or more than alertPageSize of them sharing
+			// one millisecond — is requeried unchanged forever. Step past it
+			// and say what may have been lost.
+			r.alertCheckpoint = pageStart.Add(time.Millisecond)
+			r.logger.Warn("alert page did not advance the update checkpoint, stepping past it; "+
+				"alerts beyond the page limit in that millisecond are not collected",
+				zap.Time("updated_millisecond", pageStart),
+				zap.Int("page", len(ids)))
 		}
 	}
 }
