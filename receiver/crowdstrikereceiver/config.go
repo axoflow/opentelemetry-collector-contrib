@@ -23,6 +23,7 @@ var (
 	errNoPollInterval   = errors.New("poll_interval must be positive")
 	errNegativeLookback = errors.New("initial_lookback must not be negative")
 	errNoSource         = errors.New("nothing to collect: disable_alerts is set and ngsiem_search::repository is empty")
+	errNoSearchPoll     = errors.New("ngsiem_search::poll_interval must not be negative; zero inherits the top-level poll_interval")
 )
 
 // NGSIEMSearchConfig configures pulling log events from an NG-SIEM repository
@@ -36,6 +37,11 @@ type NGSIEMSearchConfig struct {
 	// Defaults to a match-all query. Aggregating functions must not be used
 	// here, as each matched event is emitted as one log record.
 	QueryString string `mapstructure:"query_string"`
+
+	// PollInterval overrides the top-level one for this poller. A query job
+	// costs far more than an alert page, so the two rarely want the same
+	// cadence. Zero inherits the top-level value.
+	PollInterval time.Duration `mapstructure:"poll_interval"`
 }
 
 type Config struct {
@@ -102,6 +108,9 @@ func (c *Config) Validate() error {
 	// config validation.
 	if c.PollInterval <= 0 {
 		errs = errors.Join(errs, errNoPollInterval)
+	}
+	if c.NGSIEMSearch.PollInterval < 0 {
+		errs = errors.Join(errs, errNoSearchPoll)
 	}
 	if c.InitialLookback < 0 {
 		errs = errors.Join(errs, errNegativeLookback)

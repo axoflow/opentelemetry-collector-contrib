@@ -131,16 +131,20 @@ func (r *crowdstrikeReceiver) Start(ctx context.Context, host component.Host) er
 	r.cancel = cancel
 
 	if !r.config.DisableAlerts {
-		r.wg.Go(func() { r.poll(pollCtx, "alerts", r.pollAlertsOnce) })
+		r.wg.Go(func() { r.poll(pollCtx, "alerts", r.config.PollInterval, r.pollAlertsOnce) })
 	}
 	if r.config.NGSIEMSearch.Repository != "" {
-		r.wg.Go(func() { r.poll(pollCtx, "ngsiem_search", r.pollSearchOnce) })
+		interval := r.config.NGSIEMSearch.PollInterval
+		if interval == 0 {
+			interval = r.config.PollInterval
+		}
+		r.wg.Go(func() { r.poll(pollCtx, "ngsiem_search", interval, r.pollSearchOnce) })
 	}
 	return nil
 }
 
-func (r *crowdstrikeReceiver) poll(ctx context.Context, name string, once func(context.Context) error) {
-	ticker := time.NewTicker(r.config.PollInterval)
+func (r *crowdstrikeReceiver) poll(ctx context.Context, name string, interval time.Duration, once func(context.Context) error) {
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	// The first poll goes out on start rather than an interval later: a

@@ -73,6 +73,7 @@ receivers:
 |----------------|--------|---------|-------------------------------------------------------------------------------------------------------------------------------|
 | `repository`   | string |         | NG-SIEM repository (view) to query, e.g. `search-all`. Setting it enables the poller.                                        |
 | `query_string` | string | `*`     | CQL filter selecting the events to pull. Aggregating functions must not be used: every matched event becomes one log record. |
+| `poll_interval` | duration | top-level `poll_interval` | Cadence for this poller. A query job costs far more than an alert page, so the two rarely want the same one. |
 
 ## Output
 

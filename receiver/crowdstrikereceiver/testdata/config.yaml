@@ -15,3 +15,4 @@ crowdstrike/full:
   ngsiem_search:
     repository: search-all
     query_string: "#type = falcon"
+    poll_interval: 10m

@@ -3,6 +3,10 @@ $defs:
     description: NGSIEMSearchConfig configures pulling log events from an NG-SIEM repository via the query-jobs API.
     type: object
     properties:
+      poll_interval:
+        description: PollInterval overrides the top-level one for this poller. A query job costs far more than an alert page, so the two rarely want the same cadence. Zero inherits the top-level value.
+        type: string
+        format: duration
       query_string:
         description: QueryString is the CQL filter selecting the events to pull. Defaults to a match-all query. Aggregating functions must not be used here, as each matched event is emitted as one log record.
         type: string

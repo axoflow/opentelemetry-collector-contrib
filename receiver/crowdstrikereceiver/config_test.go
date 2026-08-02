@@ -46,8 +46,9 @@ func TestLoadConfig(t *testing.T) {
 				DisableAlerts:    true,
 				Debug:            true,
 				NGSIEMSearch: NGSIEMSearchConfig{
-					Repository:  "search-all",
-					QueryString: "#type = falcon",
+					Repository:   "search-all",
+					QueryString:  "#type = falcon",
+					PollInterval: 10 * time.Minute,
 				},
 			},
 		},
@@ -119,6 +120,13 @@ func TestValidate(t *testing.T) {
 				c.PollInterval = 0
 			},
 			expectedErr: errNoPollInterval,
+		},
+		{
+			name: "negative search poll interval",
+			mutate: func(c *Config) {
+				c.NGSIEMSearch.PollInterval = -time.Second
+			},
+			expectedErr: errNoSearchPoll,
 		},
 		{
 			name: "negative lookback",
