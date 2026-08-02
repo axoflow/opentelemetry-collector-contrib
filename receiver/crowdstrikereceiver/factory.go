@@ -13,6 +13,7 @@ import (
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/receiver"
+	"go.opentelemetry.io/collector/receiver/receiverhelper"
 	"go.uber.org/zap"
 	"golang.org/x/oauth2"
 
@@ -121,6 +122,15 @@ func newCrowdstrikeReceiver(ctx context.Context, cfg *Config, consumer consumer.
 		return nil, fmt.Errorf("failed to create CrowdStrike client: %w", err)
 	}
 
+	obsrecv, err := receiverhelper.NewObsReport(receiverhelper.ObsReportSettings{
+		ReceiverID:             settings.ID,
+		Transport:              "http",
+		ReceiverCreateSettings: settings,
+	})
+	if err != nil {
+		return nil, err
+	}
+
 	logger.Info("CrowdStrike client created successfully")
 
 	return &crowdstrikeReceiver{
@@ -128,6 +138,7 @@ func newCrowdstrikeReceiver(ctx context.Context, cfg *Config, consumer consumer.
 		logger:       logger,
 		nextConsumer: consumer,
 		config:       cfg,
+		obsrecv:      obsrecv,
 		api: &gofalconAPI{
 			client:     client,
 			logger:     logger,

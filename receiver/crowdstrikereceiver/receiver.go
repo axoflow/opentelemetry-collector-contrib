@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -18,7 +17,10 @@ import (
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/plog"
+	"go.opentelemetry.io/collector/receiver/receiverhelper"
 	"go.uber.org/zap"
+
+	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/crowdstrikereceiver/internal/metadata"
 )
 
 // FQL timestamp literal with millisecond precision, which is the granularity
@@ -85,6 +87,7 @@ type crowdstrikeReceiver struct {
 	config       *Config
 	api          falconAPI
 	checkpoints  *checkpointStore
+	obsrecv      *receiverhelper.ObsReport
 
 	// alertCheckpoint is the highest updated_timestamp consumed so far;
 	// searchCheckpoint is the ingest-time lower bound of the next search
@@ -172,6 +175,16 @@ func (r *crowdstrikeReceiver) poll(ctx context.Context, name string, interval ti
 	}
 }
 
+// consume delivers a batch and reports it through the standard receiver
+// observability, so accepted and refused record counts show up in the
+// collector's own metrics like every other receiver's.
+func (r *crowdstrikeReceiver) consume(ctx context.Context, logs plog.Logs) error {
+	obsCtx := r.obsrecv.StartLogsOp(ctx)
+	err := r.nextConsumer.ConsumeLogs(obsCtx, logs)
+	r.obsrecv.EndLogsOp(obsCtx, metadata.Type.String(), logs.LogRecordCount(), err)
+	return err
+}
+
 func (r *crowdstrikeReceiver) pollAlertsOnce(ctx context.Context) error {
 	// Instead of offset pagination, each page advances the updated_timestamp
 	// filter: the result set cannot shift under us while we page through it.
@@ -194,12 +207,15 @@ func (r *crowdstrikeReceiver) pollAlertsOnce(ctx context.Context) error {
 			return nil
 		}
 
-		logs, err := convertAlertToPlogLogs(page)
-		if err != nil {
-			return fmt.Errorf("converting alerts: %w", err)
-		}
-		if err := r.nextConsumer.ConsumeLogs(ctx, *logs); err != nil {
-			return fmt.Errorf("consuming alerts: %w", err)
+		fresh := withoutSeenAlerts(page, r.alertBoundaryIDs)
+		if len(fresh) > 0 {
+			logs, err := convertAlertToPlogLogs(fresh)
+			if err != nil {
+				return fmt.Errorf("converting alerts: %w", err)
+			}
+			if err := r.consume(ctx, *logs); err != nil {
+				return fmt.Errorf("consuming alerts: %w", err)
+			}
 		}
 
 		newest := pageStart
@@ -309,7 +325,7 @@ func (r *crowdstrikeReceiver) pollSearchOnce(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("converting query job events: %w", err)
 		}
-		if err := r.nextConsumer.ConsumeLogs(ctx, *logs); err != nil {
+		if err := r.consume(ctx, *logs); err != nil {
 			return fmt.Errorf("consuming query job events: %w", err)
 		}
 	}
@@ -416,20 +432,16 @@ func ingestBoundary(events []models.APIQueryJobsResultsEvents) (int64, map[strin
 	return newest, ids, newest > 0
 }
 
-// epochMillis reads an epoch-milliseconds value that may arrive as float64,
-// json.Number, or string depending on the JSON decoder in use.
+// epochMillis reads an epoch-milliseconds field of an event. The swagger
+// runtime decodes response bodies with UseNumber, so every JSON number in one
+// arrives as a json.Number.
 func epochMillis(v any) (int64, bool) {
-	switch n := v.(type) {
-	case float64:
-		return int64(n), true
-	case json.Number:
-		millis, err := n.Int64()
-		return millis, err == nil
-	case string:
-		millis, err := strconv.ParseInt(n, 10, 64)
-		return millis, err == nil
+	number, ok := v.(json.Number)
+	if !ok {
+		return 0, false
 	}
-	return 0, false
+	millis, err := number.Int64()
+	return millis, err == nil
 }
 
 // falconSeverityNumbers maps severity_name — the API's own bucketing of the

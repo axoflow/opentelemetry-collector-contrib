@@ -111,23 +111,17 @@ func TestCheckpointsSurviveRestart(t *testing.T) {
 
 	newReceiver := func(t *testing.T, api falconAPI, storageID *component.ID) *crowdstrikeReceiver {
 		t.Helper()
-		cfg := createDefaultConfig().(*Config)
-		cfg.PollInterval = 10 * time.Millisecond
-		cfg.InitialLookback = 24 * time.Hour
-		cfg.StorageID = storageID
-		return &crowdstrikeReceiver{
-			id:           component.NewID(metadata.Type),
-			logger:       zaptest.NewLogger(t),
-			nextConsumer: consumertest.NewNop(),
-			config:       cfg,
-			api:          api,
-		}
+		return newLifecycleReceiver(t, api, consumertest.NewNop(), func(cfg *Config) {
+			cfg.PollInterval = 10 * time.Millisecond
+			cfg.InitialLookback = 24 * time.Hour
+			cfg.StorageID = storageID
+		})
 	}
 
 	ext := storagetest.NewFileBackedStorageExtension("test", storageDir)
 	host := storagetest.NewStorageHost().WithExtension(ext.ID, ext)
 
-	first := &fakeAPI{alertPages: [][]*models.DetectsAlert{{{UpdatedTimestamp: &lastUpdated}}}}
+	first := &fakeAPI{alerts: []*models.DetectsAlert{{UpdatedTimestamp: &lastUpdated}}}
 	r := newReceiver(t, first, &ext.ID)
 	require.NoError(t, r.Start(t.Context(), host))
 	require.Eventually(t, func() bool { return len(first.since()) > 0 }, time.Second, 5*time.Millisecond)
@@ -149,6 +143,47 @@ func TestCheckpointsSurviveRestart(t *testing.T) {
 		"the restarted receiver must resume from the stored checkpoint")
 }
 
+// The NG-SIEM checkpoint survives a restart the same way, and it is keyed by
+// the repository it was taken against: aiming the receiver at another one has
+// to start that one from the configured lookback rather than resume a window
+// queried against a repository holding entirely different events.
+func TestSearchCheckpointsAreKeptPerRepository(t *testing.T) {
+	storageDir := t.TempDir()
+
+	// One collector lifetime: start, let the search poller run, stop. Reports
+	// what the poller asked for and the checkpoint it left behind.
+	run := func(t *testing.T, repository string) (*fakeAPI, time.Time) {
+		t.Helper()
+		ext := storagetest.NewFileBackedStorageExtension("test", storageDir)
+		host := storagetest.NewStorageHost().WithExtension(ext.ID, ext)
+
+		api := &fakeAPI{}
+		r := newLifecycleReceiver(t, api, consumertest.NewNop(), func(cfg *Config) {
+			cfg.PollInterval = 10 * time.Millisecond
+			cfg.InitialLookback = 24 * time.Hour
+			cfg.DisableAlerts = true
+			cfg.NGSIEMSearch.Repository = repository
+			cfg.StorageID = &ext.ID
+		})
+		require.NoError(t, r.Start(t.Context(), host))
+		require.Eventually(t, func() bool { return len(api.starts()) > 0 }, time.Second, 5*time.Millisecond)
+		require.NoError(t, r.Shutdown(t.Context()))
+		require.NoError(t, ext.Shutdown(t.Context()))
+		return api, r.searchCheckpoint
+	}
+
+	first, checkpoint := run(t, "third-party")
+	assert.WithinDuration(t, time.Now().Add(-24*time.Hour), first.starts()[0], time.Minute)
+
+	resumed, _ := run(t, "third-party")
+	assert.Equal(t, checkpoint.UTC(), resumed.starts()[0].UTC(),
+		"the restarted receiver must resume from the stored NG-SIEM checkpoint")
+
+	other, _ := run(t, "search-all")
+	assert.WithinDuration(t, time.Now().Add(-24*time.Hour), other.starts()[0], time.Minute,
+		"another repository's checkpoint must not be resumed from")
+}
+
 // Without a storage extension the same restart replays the lookback window.
 func TestCheckpointsAreLostWithoutStorage(t *testing.T) {
 	cfg := createDefaultConfig().(*Config)
@@ -162,6 +197,7 @@ func TestCheckpointsAreLostWithoutStorage(t *testing.T) {
 		nextConsumer: consumertest.NewNop(),
 		config:       cfg,
 		api:          api,
+		obsrecv:      newTestObsReport(t),
 	}
 	require.NoError(t, r.Start(t.Context(), componenttest.NewNopHost()))
 	require.Eventually(t, func() bool { return len(api.since()) > 0 }, time.Second, 5*time.Millisecond)

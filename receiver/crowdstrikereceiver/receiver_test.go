@@ -157,10 +157,10 @@ func TestEpochMillis(t *testing.T) {
 		expected int64
 		ok       bool
 	}{
-		{name: "float64", value: float64(1754157245000), expected: 1754157245000, ok: true},
 		{name: "json.Number", value: json.Number("1754157245000"), expected: 1754157245000, ok: true},
-		{name: "string", value: "1754157245000", expected: 1754157245000, ok: true},
-		{name: "unparseable string", value: "not-a-number"},
+		{name: "not a whole number of milliseconds", value: json.Number("1754157245000.5")},
+		// What a decoder not in UseNumber mode would have produced.
+		{name: "float64", value: float64(1754157245000)},
 		{name: "wrong type", value: true},
 		{name: "absent", value: nil},
 	}
