@@ -1,4 +1,5 @@
 type: crowdstrike
+display_name: CrowdStrike Receiver
 
 status:
   class: receiver
