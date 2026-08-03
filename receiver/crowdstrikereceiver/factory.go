@@ -53,7 +53,6 @@ func newCrowdstrikeReceiver(ctx context.Context, cfg *Config, consumer consumer.
 		return nil, err
 	}
 
-	// Create custom HTTP client with TLS config
 	customTransport := http.DefaultTransport.(*http.Transport).Clone()
 	customTransport.TLSClientConfig = tlsConfig
 
@@ -77,7 +76,6 @@ func newCrowdstrikeReceiver(ctx context.Context, cfg *Config, consumer consumer.
 		logger.Warn("tls settings do not apply to Falcon cloud autodiscovery; set cloud explicitly to skip that request")
 	}
 
-	// Determine cloud type
 	cloudType := falcon.CloudType(falcon.CloudAutoDiscover)
 	if cfg.Cloud != "" {
 		cloudType, err = falcon.CloudValidate(cfg.Cloud)
@@ -86,7 +84,6 @@ func newCrowdstrikeReceiver(ctx context.Context, cfg *Config, consumer consumer.
 		}
 	}
 
-	// Build API config
 	apiConfig := &falcon.ApiConfig{
 		Context:          ctx,
 		Cloud:            cloudType,
@@ -95,7 +92,6 @@ func newCrowdstrikeReceiver(ctx context.Context, cfg *Config, consumer consumer.
 		Debug:            cfg.Debug,
 	}
 
-	// Use access token OR client credentials
 	if cfg.AccessToken != "" {
 		logger.Info("Using access token for authentication")
 		apiConfig.AccessToken = string(cfg.AccessToken)
@@ -105,7 +101,6 @@ func newCrowdstrikeReceiver(ctx context.Context, cfg *Config, consumer consumer.
 		apiConfig.ClientSecret = string(cfg.ClientSecret)
 	}
 
-	// Configure host override
 	if cfg.HostOverride != "" {
 		apiConfig.HostOverride = cfg.HostOverride
 		logger.Info("Using host override", zap.String("host", cfg.HostOverride))
