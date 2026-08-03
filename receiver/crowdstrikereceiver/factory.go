@@ -54,13 +54,8 @@ func newCrowdstrikeReceiver(ctx context.Context, cfg *Config, consumer consumer.
 	}
 
 	// Create custom HTTP client with TLS config
-	customTransport := &http.Transport{
-		TLSClientConfig:       tlsConfig,
-		MaxIdleConns:          100,
-		IdleConnTimeout:       90 * time.Second,
-		TLSHandshakeTimeout:   10 * time.Second,
-		ExpectContinueTimeout: 1 * time.Second,
-	}
+	customTransport := http.DefaultTransport.(*http.Transport).Clone()
+	customTransport.TLSClientConfig = tlsConfig
 
 	customHTTPClient := &http.Client{
 		Transport: customTransport,
