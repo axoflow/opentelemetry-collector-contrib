@@ -86,6 +86,13 @@ comes from the alert `timestamp`, `severityText` from `severity_name`, and
 line as ingested; events without one (attribute-only ingests) fall back to the
 whole event as JSON. `timeUnixNano` comes from `@timestamp`.
 
+Every other field of the event becomes a log record attribute under its own
+name — no allowlist, so the `#`-prefixed fields NG-SIEM computes (`#Vendor`,
+`#event.dataset`, `#event.module`, `#repo`, …), the ECS and CPS schema fields
+and anything CrowdStrike adds later all flow through. Nested objects and arrays
+are kept nested, as OTLP kvlists and slices, rather than flattened into
+dotted keys.
+
 ## State
 
 Each poller keeps a checkpoint — the highest alert `updated_timestamp` and the

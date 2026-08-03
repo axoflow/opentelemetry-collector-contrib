@@ -522,7 +522,7 @@ func convertSearchEventsToPlogLogs(events []models.APIQueryJobsResultsEvents) (*
 		}
 		// @rawstring is the original log line as ingested — the natural body
 		// for downstream parsing; fall back to the whole event as JSON.
-		if raw, ok := fields["@rawstring"].(string); ok && raw != "" {
+		if raw, ok := fields[rawStringField].(string); ok && raw != "" {
 			lr.Body().SetStr(raw)
 		} else {
 			raw, err := json.Marshal(fields)
@@ -531,7 +531,71 @@ func convertSearchEventsToPlogLogs(events []models.APIQueryJobsResultsEvents) (*
 			}
 			lr.Body().SetStr(string(raw))
 		}
+
+		setSearchAttributes(lr.Attributes(), fields)
 	}
 
 	return &out, nil
+}
+
+// rawStringField holds the original log line as ingested. It is the log record
+// body, so it is the one field not repeated in the attributes.
+const rawStringField = "@rawstring"
+
+// setSearchAttributes carries the whole event next to the body: the
+// "#"-prefixed fields NG-SIEM computes (#Vendor, #event.dataset, #repo, …), the
+// ECS and CPS schema fields, and anything CrowdStrike adds later — routing
+// signals CrowdStrike already derived that cannot be recovered from
+// @rawstring. There is no allowlist: whatever the query job returns is emitted.
+//
+// Keys are kept verbatim and nested objects and arrays stay nested, as OTLP
+// kvlists and slices, so no key can be shadowed by a flattened one.
+func setSearchAttributes(attrs pcommon.Map, fields map[string]any) {
+	attrs.EnsureCapacity(len(fields))
+	for key, value := range fields {
+		if key == rawStringField {
+			continue
+		}
+		putAttribute(attrs.PutEmpty(key), value)
+	}
+}
+
+// putAttribute walks maps and slices into pdata itself rather than handing them
+// to FromRaw. The swagger runtime decodes with UseNumber — which is what keeps
+// large integer ids exact — so every number of an event is a json.Number at
+// whatever depth it sits, and FromRaw rejects one outright: it would fail on the
+// whole object holding a nested number, not just on the number.
+//
+// It cannot fail: a value pdata does not model is stringified instead of failing
+// the conversion, which would hold the poller on its checkpoint and re-query the
+// same batch forever.
+func putAttribute(dst pcommon.Value, value any) {
+	switch typed := value.(type) {
+	case json.Number:
+		if integer, err := typed.Int64(); err == nil {
+			dst.SetInt(integer)
+			return
+		}
+		if float, err := typed.Float64(); err == nil {
+			dst.SetDouble(float)
+			return
+		}
+	case map[string]any:
+		nested := dst.SetEmptyMap()
+		nested.EnsureCapacity(len(typed))
+		for key, element := range typed {
+			putAttribute(nested.PutEmpty(key), element)
+		}
+		return
+	case []any:
+		nested := dst.SetEmptySlice()
+		nested.EnsureCapacity(len(typed))
+		for _, element := range typed {
+			putAttribute(nested.AppendEmpty(), element)
+		}
+		return
+	}
+	if err := dst.FromRaw(value); err != nil {
+		dst.SetStr(fmt.Sprintf("%v", value))
+	}
 }

@@ -5,6 +5,7 @@ package crowdstrikereceiver // import "github.com/open-telemetry/opentelemetry-c
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -99,9 +100,10 @@ func TestConvertSearchEventsToPlogLogs(t *testing.T) {
 		event         models.APIQueryJobsResultsEvents
 		expectedBody  string
 		expectedNanos int64
+		expectedAttrs map[string]any
 	}{
 		{
-			name: "rawstring body",
+			name: "the raw line is the body, the computed fields travel next to it",
 			event: map[string]any{
 				"@timestamp":      json.Number("1754157245000"),
 				"@rawstring":      "<134>Aug 02 07:38:12 host 1,2026/08/02 07:38:12,TRAFFIC,end",
@@ -113,27 +115,59 @@ func TestConvertSearchEventsToPlogLogs(t *testing.T) {
 			},
 			expectedBody:  "<134>Aug 02 07:38:12 host 1,2026/08/02 07:38:12,TRAFFIC,end",
 			expectedNanos: 1754157245000 * int64(time.Millisecond),
+			expectedAttrs: map[string]any{
+				"@timestamp":      int64(1754157245000),
+				"#Vendor":         "palo-alto-networks",
+				"#event.dataset":  "palo-alto-networks.panos",
+				"#repo":           "example_events",
+				"observer.vendor": "Palo Alto Networks",
+				"source.ip":       "192.168.41.30",
+			},
 		},
 		{
 			name: "no rawstring falls back to the whole event",
 			event: map[string]any{
-				"@timestamp": json.Number("1754157245000"),
-				"field":      "value",
+				"@timestamp":  json.Number("1754157245000"),
+				"#event.kind": "event",
+				"field":       "value",
 			},
-			expectedBody:  `{"@timestamp":1754157245000,"field":"value"}`,
+			expectedBody:  `{"#event.kind":"event","@timestamp":1754157245000,"field":"value"}`,
 			expectedNanos: 1754157245000 * int64(time.Millisecond),
-		},
-		{
-			name: "empty rawstring falls back to the whole event",
-			event: map[string]any{
-				"@rawstring": "",
+			expectedAttrs: map[string]any{
+				"@timestamp":  int64(1754157245000),
+				"#event.kind": "event",
+				"field":       "value",
 			},
-			expectedBody: `{"@rawstring":""}`,
 		},
 		{
-			name:         "non-map event is emitted as JSON",
-			event:        []any{"a", "b"},
-			expectedBody: `["a","b"]`,
+			name:          "empty rawstring falls back to the whole event and is no attribute of its own",
+			event:         map[string]any{"@rawstring": ""},
+			expectedBody:  `{"@rawstring":""}`,
+			expectedAttrs: map[string]any{},
+		},
+		{
+			name:          "non-map event is emitted as JSON and has no fields to emit",
+			event:         []any{"a", "b"},
+			expectedBody:  `["a","b"]`,
+			expectedAttrs: map[string]any{},
+		},
+		{
+			name: "value types are preserved",
+			event: map[string]any{
+				"@ingesttimestamp": json.Number("1785694385519"),
+				"score":            json.Number("1.5"),
+				"bytes":            float64(1024),
+				"suppressed":       false,
+				"user.name":        nil,
+			},
+			expectedBody: `{"@ingesttimestamp":1785694385519,"bytes":1024,"score":1.5,"suppressed":false,"user.name":null}`,
+			expectedAttrs: map[string]any{
+				"@ingesttimestamp": int64(1785694385519),
+				"score":            1.5,
+				"bytes":            float64(1024),
+				"suppressed":       false,
+				"user.name":        nil,
+			},
 		},
 	}
 
@@ -146,8 +180,53 @@ func TestConvertSearchEventsToPlogLogs(t *testing.T) {
 			assert.Equal(t, tc.expectedBody, lr.Body().Str())
 			assert.Equal(t, tc.expectedNanos, int64(lr.Timestamp()))
 			assert.NotZero(t, lr.ObservedTimestamp())
+			assert.Equal(t, tc.expectedAttrs, lr.Attributes().AsRaw())
 		})
 	}
+}
+
+// decodeEvent decodes an event the way the swagger runtime decodes a query-job
+// response: with UseNumber, which makes every number of the event a json.Number
+// at whatever depth it sits.
+func decodeEvent(t *testing.T, event string) map[string]any {
+	t.Helper()
+	decoder := json.NewDecoder(strings.NewReader(event))
+	decoder.UseNumber()
+	var fields map[string]any
+	require.NoError(t, decoder.Decode(&fields))
+	return fields
+}
+
+// Nested objects and arrays stay nested — and keep their element types, which
+// only holds if the json.Number the production decoder leaves inside them is
+// converted there too, instead of the whole object being stringified.
+func TestConvertSearchEventsAttributesNested(t *testing.T) {
+	const event = `{
+		"@rawstring": "line",
+		"@timestamp": 1754157245000,
+		"score": 1.5,
+		"source": {"ip": "192.168.41.30", "port": 443},
+		"event": {"category": ["network", "intrusion_detection"], "duration": 0.5, "counts": [1, 2]},
+		"related.ip": ["10.0.0.1", "10.0.0.2"]
+	}`
+
+	logs, err := convertSearchEventsToPlogLogs([]models.APIQueryJobsResultsEvents{decodeEvent(t, event)})
+	require.NoError(t, err)
+
+	lr := onlyRecord(t, logs)
+	assert.Equal(t, "line", lr.Body().Str())
+	assert.Equal(t, 1754157245000*int64(time.Millisecond), int64(lr.Timestamp()))
+	assert.Equal(t, map[string]any{
+		"@timestamp": int64(1754157245000),
+		"score":      1.5,
+		"source":     map[string]any{"ip": "192.168.41.30", "port": int64(443)},
+		"event": map[string]any{
+			"category": []any{"network", "intrusion_detection"},
+			"duration": 0.5,
+			"counts":   []any{int64(1), int64(2)},
+		},
+		"related.ip": []any{"10.0.0.1", "10.0.0.2"},
+	}, lr.Attributes().AsRaw())
 }
 
 func TestEpochMillis(t *testing.T) {
