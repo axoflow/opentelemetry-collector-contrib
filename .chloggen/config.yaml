@@ -258,6 +258,7 @@ components:
     - receiver/cloudflare
     - receiver/collectd
     - receiver/couchdb
+    - receiver/crowdstrike
     - receiver/datadog
     - receiver/docker_stats
     - receiver/elasticsearch
