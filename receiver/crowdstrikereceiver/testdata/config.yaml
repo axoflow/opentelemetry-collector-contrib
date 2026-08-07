@@ -1,0 +1,18 @@
+crowdstrike/default:
+  client_id: an-api-client
+  client_secret: an-api-secret
+
+crowdstrike/full:
+  access_token: a-token
+  member_cid: a-member-cid
+  cloud: eu-1
+  host_override: api.example.invalid
+  base_path_override: /custom
+  poll_interval: 5m
+  initial_lookback: 24h
+  disable_alerts: true
+  debug: true
+  ngsiem_search:
+    repository: search-all
+    query_string: "#type = falcon"
+    poll_interval: 10m

@@ -1,0 +1,63 @@
+$defs:
+  ngsiem_search_config:
+    description: NGSIEMSearchConfig configures pulling log events from an NG-SIEM repository via the query-jobs API.
+    type: object
+    properties:
+      poll_interval:
+        description: PollInterval overrides the top-level one for this poller. A query job costs far more than an alert page, so the two rarely want the same cadence. Zero inherits the top-level value.
+        type: string
+        format: duration
+      query_string:
+        description: QueryString is the CQL filter selecting the events to pull. Defaults to a match-all query. Aggregating functions must not be used here, as each matched event is emitted as one log record.
+        type: string
+      repository:
+        description: Repository is the NG-SIEM repository (view) to query, e.g. "third-party". Setting it enables the NG-SIEM search poller.
+        type: string
+type: object
+properties:
+  access_token:
+    description: AccessToken is the access token used to access the CrowdStrike Falcon platform. If used, either Cloud or HostOverride must be provided. *required* if ClientID and ClientSecret are empty.
+    $ref: go.opentelemetry.io/collector/config/configopaque.string
+  base_path_override:
+    description: BasePathOverride allows to override default base path
+    type: string
+  client_id:
+    description: ClientID used for authentication with CrowdStrike Falcon platform. *required* if AccessToken is empty.
+    type: string
+  client_secret:
+    description: ClientSecret used for authentication with CrowdStrike Falcon platform. *required* if AccessToken is empty.
+    $ref: go.opentelemetry.io/collector/config/configopaque.string
+  cloud:
+    description: Cloud specifies the Falcon Cloud to connect to (e.g., "us-1", "us-2", "eu-1").
+    type: string
+  debug:
+    description: Debug enables debug logging of all HTTP traffic going through the API runtime.
+    type: boolean
+  disable_alerts:
+    description: DisableAlerts turns off the Alerts API poller.
+    type: boolean
+  host_override:
+    description: HostOverride allows to override host. Cloud will be ignored.
+    type: string
+  initial_lookback:
+    description: InitialLookback bounds how far back the first poll reaches. Zero means only data arriving after the receiver starts is collected.
+    type: string
+    format: duration
+  member_cid:
+    description: MemberCID is an optional CID selector for cases when the ClientID/ClientSecret has access to multiple CIDs.
+    type: string
+  ngsiem_search:
+    description: NGSIEMSearch enables pulling log events from an NG-SIEM repository.
+    $ref: ngsiem_search_config
+  poll_interval:
+    description: PollInterval specifies how often to poll the CrowdStrike API for new data.
+    type: string
+    format: duration
+  storage:
+    description: StorageID points at a storage extension keeping the poll checkpoints across restarts. Without one they live in memory only, so a restart resumes from now-InitialLookback.
+    x-pointer: true
+    type: string
+    x-customType: go.opentelemetry.io/collector/component.ID
+  tls:
+    description: TLS settings
+    $ref: go.opentelemetry.io/collector/config/configtls.client_config

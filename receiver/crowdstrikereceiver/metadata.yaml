@@ -1,10 +1,11 @@
 type: crowdstrike
+display_name: CrowdStrike Receiver
 
 status:
   class: receiver
   stability:
     development: [logs]
-  distributions: [contrib]
+  distributions: []
   codeowners:
     active: [overorion]
   unsupported_platforms: []

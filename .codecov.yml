@@ -677,6 +677,10 @@ component_management:
     name: receiver_couchdb
     paths:
     - receiver/couchdbreceiver/**
+  - component_id: receiver_crowdstrike
+    name: receiver_crowdstrike
+    paths:
+    - receiver/crowdstrikereceiver/**
   - component_id: receiver_datadog
     name: receiver_datadog
     paths:

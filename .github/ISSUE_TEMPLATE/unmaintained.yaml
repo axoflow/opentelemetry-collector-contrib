@@ -269,6 +269,7 @@ body:
       - receiver/cloudfoundry
       - receiver/collectd
       - receiver/couchdb
+      - receiver/crowdstrike
       - receiver/datadog
       - receiver/dockerstats
       - receiver/elasticsearch
