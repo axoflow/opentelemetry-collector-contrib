@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -154,7 +155,7 @@ func newLifecycleReceiver(t *testing.T, api falconAPI, next consumer.Logs, confi
 		logger:       zaptest.NewLogger(t),
 		nextConsumer: next,
 		config:       cfg,
-		api:          api,
+		newAPI:       func(context.Context) (falconAPI, error) { return api, nil },
 		obsrecv:      newTestObsReport(t),
 	}
 }
@@ -634,4 +635,40 @@ func TestShutdownWaitsForAnInFlightDelivery(t *testing.T) {
 
 	close(next.release)
 	require.NoError(t, <-stopped)
+}
+
+// A client that cannot be built at Start — autodiscovery reaches the OAuth
+// endpoint — is retried rather than failing the collector.
+func TestStartRetriesClientCreation(t *testing.T) {
+	api := &fakeAPI{}
+	r := newLifecycleReceiver(t, api, consumertest.NewNop(), func(cfg *Config) {
+		cfg.PollInterval = 10 * time.Millisecond
+		cfg.InitialLookback = time.Hour
+	})
+	var attempts atomic.Int32
+	r.newAPI = func(context.Context) (falconAPI, error) {
+		if attempts.Add(1) < 3 {
+			return nil, errors.New("autodiscover failed")
+		}
+		return api, nil
+	}
+
+	require.NoError(t, r.Start(t.Context(), componenttest.NewNopHost()))
+	defer func() { require.NoError(t, r.Shutdown(t.Context())) }()
+
+	require.Eventually(t, func() bool { return len(api.since()) >= 1 }, time.Second, 5*time.Millisecond)
+	assert.EqualValues(t, 3, attempts.Load())
+}
+
+// Shutdown must not wait out a retry back-off, however long the poll interval.
+func TestShutdownInterruptsClientRetry(t *testing.T) {
+	r := newLifecycleReceiver(t, &fakeAPI{}, consumertest.NewNop(), func(cfg *Config) {
+		cfg.PollInterval = time.Hour
+	})
+	r.newAPI = func(context.Context) (falconAPI, error) { return nil, errors.New("autodiscover failed") }
+
+	require.NoError(t, r.Start(t.Context(), componenttest.NewNopHost()))
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	require.NoError(t, r.Shutdown(ctx))
 }

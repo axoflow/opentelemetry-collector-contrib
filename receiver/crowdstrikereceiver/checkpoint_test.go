@@ -186,19 +186,11 @@ func TestSearchCheckpointsAreKeptPerRepository(t *testing.T) {
 
 // Without a storage extension the same restart replays the lookback window.
 func TestCheckpointsAreLostWithoutStorage(t *testing.T) {
-	cfg := createDefaultConfig().(*Config)
-	cfg.PollInterval = 10 * time.Millisecond
-	cfg.InitialLookback = time.Hour
-
 	api := &fakeAPI{}
-	r := &crowdstrikeReceiver{
-		id:           component.NewID(metadata.Type),
-		logger:       zaptest.NewLogger(t),
-		nextConsumer: consumertest.NewNop(),
-		config:       cfg,
-		api:          api,
-		obsrecv:      newTestObsReport(t),
-	}
+	r := newLifecycleReceiver(t, api, consumertest.NewNop(), func(cfg *Config) {
+		cfg.PollInterval = 10 * time.Millisecond
+		cfg.InitialLookback = time.Hour
+	})
 	require.NoError(t, r.Start(t.Context(), componenttest.NewNopHost()))
 	require.Eventually(t, func() bool { return len(api.since()) > 0 }, time.Second, 5*time.Millisecond)
 	require.NoError(t, r.Shutdown(t.Context()))

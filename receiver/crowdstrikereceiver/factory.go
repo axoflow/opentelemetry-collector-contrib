@@ -61,12 +61,6 @@ func newCrowdstrikeReceiver(ctx context.Context, cfg *Config, consumer consumer.
 		Timeout:   5 * time.Minute,
 	}
 
-	// Inject HTTP client into context for OAuth2. gofalcon builds the API
-	// client's transport on top of this one, so the TLS settings reach every
-	// API call without touching the process-global http.DefaultTransport,
-	// which races with any other component constructing an HTTP client.
-	ctx = context.WithValue(ctx, oauth2.HTTPClient, customHTTPClient)
-
 	// The one request that transport does not cover is gofalcon's cloud
 	// autodiscovery, which goes through http.DefaultTransport internally. It
 	// only matters when the settings change trust or client identity.
@@ -85,7 +79,6 @@ func newCrowdstrikeReceiver(ctx context.Context, cfg *Config, consumer consumer.
 	}
 
 	apiConfig := &falcon.ApiConfig{
-		Context:          ctx,
 		Cloud:            cloudType,
 		MemberCID:        cfg.MemberCID,
 		BasePathOverride: cfg.BasePathOverride,
@@ -106,12 +99,6 @@ func newCrowdstrikeReceiver(ctx context.Context, cfg *Config, consumer consumer.
 		logger.Info("Using host override", zap.String("host", cfg.HostOverride))
 	}
 
-	client, err := falcon.NewClient(apiConfig)
-	if err != nil {
-		logger.Error("Failed to create CrowdStrike client", zap.Error(err))
-		return nil, fmt.Errorf("failed to create CrowdStrike client: %w", err)
-	}
-
 	obsrecv, err := receiverhelper.NewObsReport(receiverhelper.ObsReportSettings{
 		ReceiverID:             settings.ID,
 		Transport:              "http",
@@ -121,19 +108,29 @@ func newCrowdstrikeReceiver(ctx context.Context, cfg *Config, consumer consumer.
 		return nil, err
 	}
 
-	logger.Info("CrowdStrike client created successfully")
-
 	return &crowdstrikeReceiver{
 		id:           settings.ID,
 		logger:       logger,
 		nextConsumer: consumer,
 		config:       cfg,
 		obsrecv:      obsrecv,
-		api: &gofalconAPI{
-			client:     client,
-			logger:     logger,
-			repository: cfg.NGSIEMSearch.Repository,
-			query:      cfg.NGSIEMSearch.QueryString,
+		newAPI: func(ctx context.Context) (falconAPI, error) {
+			// Inject the HTTP client into the context for OAuth2. gofalcon
+			// builds the API client's transport on top of it, so the TLS
+			// settings reach every API call without touching the
+			// process-global http.DefaultTransport, which races with any
+			// other component constructing an HTTP client.
+			apiConfig.Context = context.WithValue(ctx, oauth2.HTTPClient, customHTTPClient)
+			client, err := falcon.NewClient(apiConfig)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create CrowdStrike client: %w", err)
+			}
+			return &gofalconAPI{
+				client:     client,
+				logger:     logger,
+				repository: cfg.NGSIEMSearch.Repository,
+				query:      cfg.NGSIEMSearch.QueryString,
+			}, nil
 		},
 	}, nil
 }
