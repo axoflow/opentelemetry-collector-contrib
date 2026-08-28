@@ -85,6 +85,7 @@ type crowdstrikeReceiver struct {
 	logger       *zap.Logger
 	nextConsumer consumer.Logs
 	config       *Config
+	newAPI       func(context.Context) (falconAPI, error)
 	api          falconAPI
 	checkpoints  *checkpointStore
 	obsrecv      *receiverhelper.ObsReport
@@ -141,17 +142,41 @@ func (r *crowdstrikeReceiver) Start(ctx context.Context, host component.Host) er
 	pollCtx, cancel := context.WithCancel(context.Background())
 	r.cancel = cancel
 
-	if !r.config.DisableAlerts {
-		r.wg.Go(func() { r.poll(pollCtx, "alerts", r.config.PollInterval, r.pollAlertsOnce) })
-	}
-	if r.config.NGSIEMSearch.Repository != "" {
-		interval := r.config.NGSIEMSearch.PollInterval
-		if interval == 0 {
-			interval = r.config.PollInterval
+	r.wg.Go(func() {
+		if !r.connect(pollCtx) {
+			return
 		}
-		r.wg.Go(func() { r.poll(pollCtx, "ngsiem_search", interval, r.pollSearchOnce) })
-	}
+		if !r.config.DisableAlerts {
+			r.wg.Go(func() { r.poll(pollCtx, "alerts", r.config.PollInterval, r.pollAlertsOnce) })
+		}
+		if r.config.NGSIEMSearch.Repository != "" {
+			interval := r.config.NGSIEMSearch.PollInterval
+			if interval == 0 {
+				interval = r.config.PollInterval
+			}
+			r.wg.Go(func() { r.poll(pollCtx, "ngsiem_search", interval, r.pollSearchOnce) })
+		}
+	})
 	return nil
+}
+
+// connect builds the API client, retrying on the poll cadence until it
+// succeeds or ctx is done.
+func (r *crowdstrikeReceiver) connect(ctx context.Context) bool {
+	for {
+		api, err := r.newAPI(ctx)
+		if err == nil {
+			r.api = api
+			r.logger.Info("CrowdStrike client created successfully")
+			return true
+		}
+		r.logger.Error("Failed to create CrowdStrike client", zap.Error(err))
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(r.config.PollInterval):
+		}
+	}
 }
 
 func (r *crowdstrikeReceiver) poll(ctx context.Context, name string, interval time.Duration, once func(context.Context) error) {

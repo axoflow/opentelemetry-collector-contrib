@@ -127,6 +127,10 @@ service:
 - `tls` settings are not applied to Falcon cloud autodiscovery, which the SDK
   performs over the process-default HTTP transport. Set `cloud` explicitly to
   avoid that request.
+- The API client is built when the receiver starts and rebuilt on
+  `poll_interval` until it succeeds, so bad credentials or an unreachable
+  Falcon cloud show up as errors in the log rather than a collector that
+  refuses to start.
 - Boundary de-duplication is in memory only: a restart may re-deliver the
   alerts updated, and the events ingested, in the checkpoint's millisecond.
 - An NG-SIEM search window ends 30 seconds behind the collector's clock, so
