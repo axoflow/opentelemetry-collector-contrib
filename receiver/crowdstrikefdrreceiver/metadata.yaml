@@ -1,0 +1,18 @@
+display_name: CrowdStrike FDR Receiver
+type: crowdstrike_fdr
+
+description: This receiver ingests CrowdStrike Falcon Data Replicator (FDR) batches announced on the CrowdStrike-provided SQS queue and stored in the CrowdStrike-provided S3 bucket.
+
+status:
+  class: receiver
+  stability:
+    development: [logs]
+  distributions: [contrib]
+  codeowners:
+    active: [OverOrion]
+
+tests:
+  config:
+    queue_url: https://sqs.us-west-1.amazonaws.com/123456789012/cs-prod-cannonball-queue
+    region: us-west-1
+  skip_lifecycle: true

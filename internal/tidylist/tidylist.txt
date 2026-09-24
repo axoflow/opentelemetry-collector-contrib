@@ -53,6 +53,7 @@ internal/k8sconfig
 internal/metadataproviders
 internal/datadog
 pkg/datadog
+receiver/crowdstrikefdrreceiver
 receiver/datadogreceiver
 receiver/jaegerreceiver
 receiver/signalfxreceiver
