@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"encoding/base64"
 	"io"
 	"testing"
 	"time"
@@ -21,6 +22,8 @@ import (
 	"go.opentelemetry.io/collector/component/componenttest"
 	"go.opentelemetry.io/collector/consumer/consumertest"
 	"go.opentelemetry.io/collector/receiver/receivertest"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 
 	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/crowdstrikefdrreceiver/internal/metadata"
 )
@@ -78,13 +81,17 @@ func gz(t *testing.T, s string) []byte {
 	return buf.Bytes()
 }
 
-func run(t *testing.T, sqsClient *fakeSQS, s3Client *fakeS3) *consumertest.LogsSink {
+func run(t *testing.T, sqsClient *fakeSQS, s3Client *fakeS3, loggers ...*zap.Logger) *consumertest.LogsSink {
 	cfg := createDefaultConfig().(*Config)
 	cfg.QueueURL = "https://sqs.us-west-1.amazonaws.com/123/queue"
 	cfg.Region = "us-west-1"
 
 	sink := new(consumertest.LogsSink)
-	r, err := newReceiver(cfg, receivertest.NewNopSettings(metadata.Type), sink)
+	settings := receivertest.NewNopSettings(metadata.Type)
+	if len(loggers) > 0 {
+		settings.Logger = loggers[0]
+	}
+	r, err := newReceiver(cfg, settings, sink)
 	require.NoError(t, err)
 	r.sqs, r.s3 = sqsClient, s3Client
 
@@ -131,6 +138,7 @@ func TestIncompleteBatchStaysQueued(t *testing.T) {
 }
 
 func TestDecodeFailureStaysQueued(t *testing.T) {
+	core, observed := observer.New(zap.WarnLevel)
 	sqsClient := &fakeSQS{messages: message(batchMessage)}
 	s3Client := &fakeS3{objects: map[string][]byte{
 		"data/batch-1/_SUCCESS":      {},
@@ -138,10 +146,44 @@ func TestDecodeFailureStaysQueued(t *testing.T) {
 		"data/batch-1/part-00001.gz": gz(t, "not json\n"),
 	}}
 
-	sink := run(t, sqsClient, s3Client)
+	sink := run(t, sqsClient, s3Client, zap.New(core))
 
 	assert.Empty(t, sqsClient.deleted)
 	assert.Equal(t, 1, sink.LogRecordCount(), "the good file is delivered before the failure is detected")
+
+	warnings := observed.FilterMessageSnippet("decode").All()
+	require.Len(t, warnings, 1)
+	assert.Contains(t, warnings[0].Message, "base64")
+	fields := warnings[0].ContextMap()
+	assert.Equal(t, "base64", fields["payload_encoding"])
+	assert.Equal(t, base64.StdEncoding.EncodeToString([]byte("not json\n")), fields["payload"])
+	assert.Equal(t, "data/batch-1/part-00001.gz", fields["key"])
+	assert.NotEmpty(t, fields["error"])
+}
+
+func TestDecompressFailureLogsPayload(t *testing.T) {
+	core, observed := observer.New(zap.WarnLevel)
+	sqsClient := &fakeSQS{messages: message(batchMessage)}
+	notGzip := []byte("plain text, not gzip")
+	s3Client := &fakeS3{objects: map[string][]byte{
+		"data/batch-1/_SUCCESS":      {},
+		"data/batch-1/part-00000.gz": notGzip,
+		"data/batch-1/part-00001.gz": gz(t, `{"n":"two"}`+"\n"),
+	}}
+
+	sink := run(t, sqsClient, s3Client, zap.New(core))
+
+	assert.Empty(t, sqsClient.deleted, "batch must stay queued")
+	assert.Equal(t, 0, sink.LogRecordCount(), "ingestion stops at the first broken file")
+
+	warnings := observed.FilterMessageSnippet("decompress").All()
+	require.Len(t, warnings, 1)
+	assert.Contains(t, warnings[0].Message, "base64")
+	fields := warnings[0].ContextMap()
+	assert.Equal(t, "base64", fields["payload_encoding"])
+	assert.Equal(t, base64.StdEncoding.EncodeToString(notGzip), fields["payload"])
+	assert.Equal(t, "data/batch-1/part-00000.gz", fields["key"])
+	assert.NotEmpty(t, fields["error"])
 }
 
 func TestForeignMessageIsDiscarded(t *testing.T) {
