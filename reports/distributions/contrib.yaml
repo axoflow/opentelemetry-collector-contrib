@@ -159,6 +159,7 @@ components:
         - cloudflare
         - collectd
         - couchdb
+        - crowdstrike_fdr
         - datadog
         - docker_stats
         - elasticsearch

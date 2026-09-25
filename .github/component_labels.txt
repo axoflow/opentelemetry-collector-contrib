@@ -251,6 +251,7 @@ receiver/cloudflarereceiver receiver/cloudflare
 receiver/cloudfoundryreceiver receiver/cloudfoundry
 receiver/collectdreceiver receiver/collectd
 receiver/couchdbreceiver receiver/couchdb
+receiver/crowdstrikefdrreceiver receiver/crowdstrike_fdr
 receiver/datadogreceiver receiver/datadog
 receiver/dockerstatsreceiver receiver/dockerstats
 receiver/elasticsearchreceiver receiver/elasticsearch

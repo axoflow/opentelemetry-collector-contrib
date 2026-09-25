@@ -1,0 +1,7 @@
+{"event_simpleName":"ProcessRollup2","timestamp":"1594323680123","aid":"a1b2c3","cid":"c1","ImageFileName":"\\Device\\HarddiskVolume1\\Windows\\explorer.exe"}
+{"EventType":"Event_ExternalApiEvent","UTCTimestamp":1594323680000,"OperationName":"createUser"}
+
+{"aid":"a1b2c3","Time":"1594323680.1234567","ComputerName":"host-1"}
+{"aid":"a1b2c3","_time":"1594323680.123","LocalAddressIP4":"10.0.0.1"}
+{"event_type":"ztha","modified_time":"2020-07-09T19:41:20.123456789Z","aid":"a1b2c3"}
+{"aid":"no-time"}
