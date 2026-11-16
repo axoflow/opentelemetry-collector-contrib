@@ -4,16 +4,23 @@
 package sftpreceiver // import "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/sftpreceiver"
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/pkg/sftp"
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer"
+	"go.opentelemetry.io/collector/consumer/consumererror"
+	"go.opentelemetry.io/collector/pdata/pcommon"
+	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/receiver"
 	"go.opentelemetry.io/collector/receiver/receiverhelper"
 	"go.uber.org/zap"
@@ -22,9 +29,17 @@ import (
 )
 
 const (
-	transport   = "sftp"
-	dialTimeout = 30 * time.Second
+	transport    = "sftp"
+	dialTimeout  = 30 * time.Second
+	maxLineSize  = 1 << 20 // longer lines are split, like filelog's max_log_size
+	maxBatchSize = 1000    // log records per ConsumeLogs call
 )
+
+// fileState is the checkpoint of one remote file.
+type fileState struct {
+	Offset int64 // bytes already delivered
+	Size   int64 // size seen by the previous poll
+}
 
 type sftpReceiver struct {
 	cfg     *Config
@@ -33,6 +48,7 @@ type sftpReceiver struct {
 	obsrecv *receiverhelper.ObsReport
 
 	sshCfg *ssh.ClientConfig
+	files  map[string]fileState // only touched by the polling goroutine
 
 	cancel context.CancelFunc
 	done   chan struct{}
@@ -84,8 +100,9 @@ func (r *sftpReceiver) Shutdown(context.Context) error {
 	return nil
 }
 
-// setup prepares the SSH credentials.
+// setup prepares the SSH credentials and the file states.
 func (r *sftpReceiver) setup() (err error) {
+	r.files = map[string]fileState{}
 	r.sshCfg, err = r.cfg.sshClientConfig()
 	return err
 }
@@ -145,7 +162,7 @@ func (noKey) Marshal() []byte { return nil }
 
 func (noKey) Verify([]byte, *ssh.Signature) error { return errors.New("not a key") }
 
-// poll connects to the server.
+// poll connects to the server and delivers what was added to the matching files since the last poll.
 func (r *sftpReceiver) poll(ctx context.Context) error {
 	// ponytail: reconnects on every poll; keep the connection open if the handshake cost matters.
 	conn, err := (&net.Dialer{Timeout: dialTimeout}).DialContext(ctx, "tcp", r.cfg.Endpoint)
@@ -170,5 +187,139 @@ func (r *sftpReceiver) poll(ctx context.Context) error {
 		return err
 	}
 	defer client.Close()
+
+	var errs []error
+	seen := map[string]bool{}
+	for _, pattern := range r.cfg.Include {
+		// Glob swallows I/O errors, so an empty result does not mean the files are gone.
+		paths, err := client.Glob(pattern)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		for _, p := range paths {
+			if seen[p] {
+				continue
+			}
+			seen[p] = true
+			if err := r.readFile(ctx, client, p); err != nil {
+				errs = append(errs, fmt.Errorf("%s: %w", p, err))
+			}
+		}
+	}
+
+	// Forget a file only when the server confirms it no longer exists.
+	for p := range r.files {
+		if seen[p] {
+			continue
+		}
+		if _, err := client.Stat(p); errors.Is(err, os.ErrNotExist) {
+			delete(r.files, p)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// readFile delivers the lines of p that follow its checkpoint.
+// The checkpoint only advances over lines the pipeline accepted.
+func (r *sftpReceiver) readFile(ctx context.Context, client *sftp.Client, p string) error {
+	info, err := client.Stat(p)
+	if err != nil || !info.Mode().IsRegular() {
+		return err
+	}
+	st, tracked := r.files[p]
+	size := info.Size()
+	if size < st.Offset {
+		// ponytail: truncation is the only rotation detected; a file replaced by a larger one
+		// is read from the old offset. Add a content fingerprint if files get replaced in place.
+		st.Offset = 0
+	}
+	// A file that kept its size since the previous poll is taken as complete,
+	// even when its last line has no newline.
+	idle := tracked && size == st.Size
+	st.Size = size
+	r.files[p] = st
+	if st.Offset < size {
+		return r.readLines(ctx, client, p, idle)
+	}
 	return nil
+}
+
+// readLines delivers the lines between the checkpoint of p and the size seen by this poll.
+func (r *sftpReceiver) readLines(ctx context.Context, client *sftp.Client, p string, idle bool) error {
+	st := r.files[p]
+	f, err := client.Open(p)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if _, err = f.Seek(st.Offset, io.SeekStart); err != nil {
+		return err
+	}
+	br := bufio.NewReaderSize(io.LimitReader(f, st.Size-st.Offset), maxLineSize)
+
+	var pending int64 // bytes read since the last flush
+	logs, records := newLogs()
+	flush := func() error {
+		if records.Len() > 0 {
+			if err := r.consume(ctx, logs); err != nil {
+				return err
+			}
+			logs, records = newLogs()
+		}
+		if pending == 0 {
+			return nil
+		}
+		st.Offset += pending
+		pending = 0
+		r.files[p] = st
+		return nil
+	}
+
+	now := pcommon.NewTimestampFromTime(time.Now())
+	for {
+		// ErrBufferFull returns a maxLineSize chunk of an oversized line.
+		line, err := br.ReadSlice('\n')
+		eof := errors.Is(err, io.EOF)
+		if err != nil && !eof && !errors.Is(err, bufio.ErrBufferFull) {
+			return errors.Join(err, flush())
+		}
+		if eof && !idle {
+			break // the unterminated tail may still be growing
+		}
+		pending += int64(len(line))
+		if body := bytes.TrimRight(line, "\r\n"); len(body) > 0 {
+			lr := records.AppendEmpty()
+			lr.SetObservedTimestamp(now)
+			lr.Body().SetStr(strings.ToValidUTF8(string(body), "\uFFFD"))
+			lr.Attributes().PutStr("log.file.path", p)
+		}
+		if eof {
+			break
+		}
+		if records.Len() >= maxBatchSize {
+			if err := flush(); err != nil {
+				return err
+			}
+		}
+	}
+	return flush()
+}
+
+func newLogs() (plog.Logs, plog.LogRecordSlice) {
+	logs := plog.NewLogs()
+	return logs, logs.ResourceLogs().AppendEmpty().ScopeLogs().AppendEmpty().LogRecords()
+}
+
+func (r *sftpReceiver) consume(ctx context.Context, logs plog.Logs) error {
+	n := logs.LogRecordCount()
+	obsCtx := r.obsrecv.StartLogsOp(ctx)
+	err := r.next.ConsumeLogs(obsCtx, logs)
+	r.obsrecv.EndLogsOp(obsCtx, transport, n, err)
+	if consumererror.IsPermanent(err) {
+		// Retrying cannot succeed, and holding the checkpoint would block the file forever.
+		r.set.Logger.Error("Dropping logs rejected by the pipeline", zap.Error(err))
+		return nil
+	}
+	return err
 }
