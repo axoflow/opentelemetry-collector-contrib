@@ -1,0 +1,12 @@
+display_name: SFTP Receiver
+type: sftp
+
+description: This receiver periodically pulls text files from an SFTP server and emits one log record per line.
+
+status:
+  class: receiver
+  stability:
+    development: [logs]
+  distributions: []
+  codeowners:
+    active: []
