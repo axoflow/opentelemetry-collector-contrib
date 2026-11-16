@@ -5,6 +5,7 @@ package sftpreceiver // import "github.com/open-telemetry/opentelemetry-collecto
 
 import (
 	"context"
+	"time"
 
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer"
@@ -16,7 +17,7 @@ import (
 func NewFactory() receiver.Factory {
 	return receiver.NewFactory(
 		metadata.Type,
-		func() component.Config { return &Config{} },
+		func() component.Config { return &Config{PollInterval: time.Minute} },
 		receiver.WithLogs(createLogs, metadata.LogsStability),
 	)
 }

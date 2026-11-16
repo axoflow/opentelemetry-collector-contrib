@@ -1,1 +1,28 @@
-{}
+type: object
+properties:
+  endpoint:
+    description: Endpoint is the host:port of the SFTP server.
+    type: string
+  ignore_host_key:
+    description: IgnoreHostKey disables server verification. Testing only.
+    type: boolean
+  include:
+    description: Include lists glob patterns of remote files to read.
+    type: array
+    items:
+      type: string
+  key_file:
+    description: KeyFile is the path to a private key used for authentication.
+    type: string
+  known_hosts:
+    description: KnownHosts is the path to the known_hosts file used to verify the server.
+    type: string
+  password:
+    description: Password authenticates the user, or decrypts KeyFile when both are set.
+    $ref: go.opentelemetry.io/collector/config/configopaque.string
+  poll_interval:
+    description: PollInterval is the time between two pulls.
+    type: string
+    format: duration
+  username:
+    type: string

@@ -10,3 +10,11 @@ status:
   distributions: []
   codeowners:
     active: []
+
+tests:
+  config:
+    endpoint: localhost:1
+    username: otel
+    password: otel
+    ignore_host_key: true
+    include: [/logs/*.log]
