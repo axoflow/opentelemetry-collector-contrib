@@ -1,5 +1,8 @@
 type: object
 properties:
+  delete_after_read:
+    description: DeleteAfterRead removes a remote file once it is fully delivered and stopped growing.
+    type: boolean
   endpoint:
     description: Endpoint is the host:port of the SFTP server.
     type: string

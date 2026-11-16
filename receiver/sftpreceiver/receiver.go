@@ -246,7 +246,7 @@ func (r *sftpReceiver) poll(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
-// readFile delivers the lines of p that follow its checkpoint.
+// readFile delivers the lines of p that follow its checkpoint, and removes p when configured.
 // The checkpoint only advances over lines the pipeline accepted.
 func (r *sftpReceiver) readFile(ctx context.Context, client *sftp.Client, p string) error {
 	info, err := client.Stat(p)
@@ -266,9 +266,19 @@ func (r *sftpReceiver) readFile(ctx context.Context, client *sftp.Client, p stri
 	st.Size = size
 	r.files[p] = st
 	if st.Offset < size {
-		return r.readLines(ctx, client, p, idle)
+		if err := r.readLines(ctx, client, p, idle); err != nil {
+			return err
+		}
 	}
-	return nil
+	if !r.cfg.DeleteAfterRead || !idle || r.files[p].Offset != size {
+		return nil
+	}
+	if err := client.Remove(p); err != nil {
+		return err
+	}
+	// Dropped right away, so a new file of the same name is read from the start.
+	delete(r.files, p)
+	return r.checkpoint(ctx)
 }
 
 // readLines delivers the lines between the checkpoint of p and the size seen by this poll.

@@ -103,6 +103,24 @@ func TestPoll(t *testing.T) {
 	require.NoError(t, os.Remove(file))
 	pollAndExpect(r)
 	require.Empty(t, r.files)
+
+	// With delete_after_read, a file is removed once it is delivered and stopped growing.
+	cfg.DeleteAfterRead = true
+	write(os.O_TRUNC, "last")
+	pollAndExpect(r)
+	r.next = consumertest.NewErr(errors.New("pipeline is full"))
+	require.Error(t, r.poll(t.Context()))
+	require.FileExists(t, file)
+	r.next = sink
+	pollAndExpect(r, "last")
+	require.NoFileExists(t, file)
+
+	// A new file of the same name is read from the start and kept while it may still grow.
+	write(os.O_TRUNC, "longer than the deleted file\n")
+	pollAndExpect(r, "longer than the deleted file")
+	require.FileExists(t, file)
+	pollAndExpect(r)
+	require.NoFileExists(t, file)
 	require.NoError(t, r.storage.Close(t.Context()))
 }
 

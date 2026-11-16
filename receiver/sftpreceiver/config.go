@@ -31,6 +31,8 @@ type Config struct {
 	Include []string `mapstructure:"include"`
 	// PollInterval is the time between two pulls.
 	PollInterval time.Duration `mapstructure:"poll_interval"`
+	// DeleteAfterRead removes a remote file once it is fully delivered and stopped growing.
+	DeleteAfterRead bool `mapstructure:"delete_after_read"`
 	// StorageID is the storage extension that keeps read offsets across restarts.
 	StorageID *component.ID `mapstructure:"storage"`
 }

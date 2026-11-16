@@ -32,6 +32,7 @@ Each record carries the line as its body and the remote path in the
 | `ignore_host_key`   | `false` | Skips server verification. For testing only.                                                  |
 | `include`           |         | Required. Globs of remote files, in [`path.Match`](https://pkg.go.dev/path#Match) syntax.     |
 | `poll_interval`     | `1m`    | Time between two pulls.                                                                       |
+| `delete_after_read` | `false` | Removes a remote file once it is fully delivered and its size is unchanged between two pulls. |
 | `storage`           |         | ID of a storage extension that keeps the read offsets across restarts.                        |
 
 Create `known_hosts` with `ssh-keyscan -p <port> <host>`.
@@ -69,6 +70,10 @@ service:
 - A last line without a trailing newline is emitted once the file has the same
   size in two consecutive pulls.
 - Empty lines are skipped. Lines longer than 1 MiB are split.
+- `delete_after_read` removes a file one pull after its last change at the
+  earliest. A file whose writer pauses for longer than `poll_interval` is removed
+  under the writer, so use it for files that are complete when they match
+  `include`, for example files renamed into place.
 - A file that shrinks is read again from the beginning. A file replaced by a
   longer one is not detected and is read from the previous offset.
 - `**` globs and compressed files are not supported.
