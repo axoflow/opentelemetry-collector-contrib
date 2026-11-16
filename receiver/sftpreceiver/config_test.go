@@ -19,4 +19,8 @@ func TestConfigValidate(t *testing.T) {
 
 	cfg.Include = []string{"/logs/[.log"}
 	require.Error(t, cfg.Validate())
+	cfg.Include = []string{"/logs/*.log"}
+
+	cfg.MaxLineLength = 15
+	require.Error(t, cfg.Validate())
 }

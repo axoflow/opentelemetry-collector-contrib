@@ -36,8 +36,10 @@ func TestPoll(t *testing.T) {
 		Username:   "otel",
 		Password:   "secret",
 		KnownHosts: knownHosts,
-		Include:    []string{filepath.Join(filepath.Dir(file), "*.log")},
-		StorageID:  &storageID,
+		// Long enough for every line below except the one that tests splitting.
+		MaxLineLength: 32,
+		Include:       []string{filepath.Join(filepath.Dir(file), "*.log")},
+		StorageID:     &storageID,
 	}
 	sink := new(consumertest.LogsSink)
 	set := receivertest.NewNopSettings(metadata.Type) // the ID keys the storage, so restarts must share it
@@ -80,6 +82,10 @@ func TestPoll(t *testing.T) {
 
 	write(os.O_APPEND, "\nthree\n")
 	pollAndExpect(r, "three")
+
+	// A line longer than max_line_length is split.
+	write(os.O_APPEND, "0123456789abcdef0123456789abcdefXYZ\n")
+	pollAndExpect(r, "0123456789abcdef0123456789abcdef", "XYZ")
 
 	// A refused batch is delivered again by the next poll.
 	write(os.O_APPEND, "four\n")

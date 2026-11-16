@@ -22,18 +22,19 @@ Each record carries the line as its body and the remote path in the
 
 ## Configuration
 
-| Field               | Default | Description                                                                                   |
-|---------------------|---------|-----------------------------------------------------------------------------------------------|
-| `endpoint`          |         | Required. `host:port` of the SFTP server.                                                     |
-| `username`          |         | Required.                                                                                     |
-| `password`          |         | Password of the user, or the passphrase of `key_file` when both are set.                      |
-| `key_file`          |         | Path to a private key. `password` or `key_file` is required.                                  |
-| `known_hosts`       |         | Path to a `known_hosts` file that verifies the server. Required unless `ignore_host_key`.     |
-| `ignore_host_key`   | `false` | Skips server verification. For testing only.                                                  |
-| `include`           |         | Required. Globs of remote files, in [`path.Match`](https://pkg.go.dev/path#Match) syntax.     |
-| `poll_interval`     | `1m`    | Time between two pulls.                                                                       |
-| `delete_after_read` | `false` | Removes a remote file once it is fully delivered and its size is unchanged between two pulls. |
-| `storage`           |         | ID of a storage extension that keeps the read offsets across restarts.                        |
+| Field               | Default   | Description                                                                                   |
+|---------------------|-----------|-----------------------------------------------------------------------------------------------|
+| `endpoint`          |           | Required. `host:port` of the SFTP server.                                                     |
+| `username`          |           | Required.                                                                                     |
+| `password`          |           | Password of the user, or the passphrase of `key_file` when both are set.                      |
+| `key_file`          |           | Path to a private key. `password` or `key_file` is required.                                  |
+| `known_hosts`       |           | Path to a `known_hosts` file that verifies the server. Required unless `ignore_host_key`.     |
+| `ignore_host_key`   | `false`   | Skips server verification. For testing only.                                                  |
+| `include`           |           | Required. Globs of remote files, in [`path.Match`](https://pkg.go.dev/path#Match) syntax.     |
+| `poll_interval`     | `1m`      | Time between two pulls.                                                                       |
+| `max_line_length`   | `1048576` | Longest line in bytes. Longer lines are split into several records. At least `16`.            |
+| `delete_after_read` | `false`   | Removes a remote file once it is fully delivered and its size is unchanged between two pulls. |
+| `storage`           |           | ID of a storage extension that keeps the read offsets across restarts.                        |
 
 Create `known_hosts` with `ssh-keyscan -p <port> <host>`.
 
@@ -69,7 +70,7 @@ service:
 - Without `storage`, a restart reads every file again from the beginning.
 - A last line without a trailing newline is emitted once the file has the same
   size in two consecutive pulls.
-- Empty lines are skipped. Lines longer than 1 MiB are split.
+- Empty lines are skipped. Lines longer than `max_line_length` are split.
 - `delete_after_read` removes a file one pull after its last change at the
   earliest. A file whose writer pauses for longer than `poll_interval` is removed
   under the writer, so use it for files that are complete when they match

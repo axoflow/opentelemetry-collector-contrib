@@ -34,8 +34,7 @@ const (
 	transport    = "sftp"
 	filesKey     = "files"
 	dialTimeout  = 30 * time.Second
-	maxLineSize  = 1 << 20 // longer lines are split, like filelog's max_log_size
-	maxBatchSize = 1000    // log records per ConsumeLogs call
+	maxBatchSize = 1000 // log records per ConsumeLogs call
 )
 
 // fileState is the checkpoint of one remote file.
@@ -292,7 +291,7 @@ func (r *sftpReceiver) readLines(ctx context.Context, client *sftp.Client, p str
 	if _, err = f.Seek(st.Offset, io.SeekStart); err != nil {
 		return err
 	}
-	br := bufio.NewReaderSize(io.LimitReader(f, st.Size-st.Offset), maxLineSize)
+	br := bufio.NewReaderSize(io.LimitReader(f, st.Size-st.Offset), r.cfg.MaxLineLength)
 
 	var pending int64 // bytes read since the last flush
 	logs, records := newLogs()
@@ -314,7 +313,7 @@ func (r *sftpReceiver) readLines(ctx context.Context, client *sftp.Client, p str
 
 	now := pcommon.NewTimestampFromTime(time.Now())
 	for {
-		// ErrBufferFull returns a maxLineSize chunk of an oversized line.
+		// ErrBufferFull returns a max_line_length chunk of an oversized line.
 		line, err := br.ReadSlice('\n')
 		eof := errors.Is(err, io.EOF)
 		if err != nil && !eof && !errors.Is(err, bufio.ErrBufferFull) {

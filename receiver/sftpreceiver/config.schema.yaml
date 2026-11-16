@@ -20,6 +20,9 @@ properties:
   known_hosts:
     description: KnownHosts is the path to the known_hosts file used to verify the server.
     type: string
+  max_line_length:
+    description: MaxLineLength is the longest line in bytes. Longer lines are split, so a file without newlines cannot exhaust memory.
+    type: integer
   password:
     description: Password authenticates the user, or decrypts KeyFile when both are set.
     $ref: go.opentelemetry.io/collector/config/configopaque.string

@@ -13,6 +13,12 @@ import (
 	"go.opentelemetry.io/collector/config/configopaque"
 )
 
+const (
+	defaultLineLength = 1 << 20
+	// minLineLength is the smallest buffer bufio.NewReaderSize honors.
+	minLineLength = 16
+)
+
 type Config struct {
 	// Endpoint is the host:port of the SFTP server.
 	Endpoint string `mapstructure:"endpoint"`
@@ -31,6 +37,9 @@ type Config struct {
 	Include []string `mapstructure:"include"`
 	// PollInterval is the time between two pulls.
 	PollInterval time.Duration `mapstructure:"poll_interval"`
+	// MaxLineLength is the longest line in bytes. Longer lines are split, so a file
+	// without newlines cannot exhaust memory.
+	MaxLineLength int `mapstructure:"max_line_length"`
 	// DeleteAfterRead removes a remote file once it is fully delivered and stopped growing.
 	DeleteAfterRead bool `mapstructure:"delete_after_read"`
 	// StorageID is the storage extension that keeps read offsets across restarts.
@@ -61,6 +70,9 @@ func (c *Config) Validate() error {
 	}
 	if c.PollInterval <= 0 {
 		errs = append(errs, errors.New("poll_interval must be positive"))
+	}
+	if c.MaxLineLength < minLineLength {
+		errs = append(errs, fmt.Errorf("max_line_length must be at least %d", minLineLength))
 	}
 	return errors.Join(errs...)
 }

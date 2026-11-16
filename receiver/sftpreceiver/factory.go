@@ -17,7 +17,7 @@ import (
 func NewFactory() receiver.Factory {
 	return receiver.NewFactory(
 		metadata.Type,
-		func() component.Config { return &Config{PollInterval: time.Minute} },
+		func() component.Config { return &Config{PollInterval: time.Minute, MaxLineLength: defaultLineLength} },
 		receiver.WithLogs(createLogs, metadata.LogsStability),
 	)
 }
