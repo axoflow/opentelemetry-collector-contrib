@@ -22,24 +22,29 @@ import (
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
 
+	"github.com/open-telemetry/opentelemetry-collector-contrib/extension/storage/storagetest"
 	"github.com/open-telemetry/opentelemetry-collector-contrib/receiver/sftpreceiver/internal/metadata"
 )
 
 func TestPoll(t *testing.T) {
 	addr, knownHosts := startSFTPServer(t)
 	file := filepath.Join(t.TempDir(), "app.log")
+	storageID := storagetest.NewStorageID("test")
+	host := storagetest.NewStorageHost().WithFileBackedStorageExtension("test", t.TempDir())
 	cfg := &Config{
 		Endpoint:   addr,
 		Username:   "otel",
 		Password:   "secret",
 		KnownHosts: knownHosts,
 		Include:    []string{filepath.Join(filepath.Dir(file), "*.log")},
+		StorageID:  &storageID,
 	}
 	sink := new(consumertest.LogsSink)
+	set := receivertest.NewNopSettings(metadata.Type) // the ID keys the storage, so restarts must share it
 	newStarted := func() *sftpReceiver {
-		r, err := newReceiver(cfg, receivertest.NewNopSettings(metadata.Type), sink)
+		r, err := newReceiver(cfg, set, sink)
 		require.NoError(t, err)
-		require.NoError(t, r.setup())
+		require.NoError(t, r.setup(t.Context(), host))
 		return r
 	}
 	// pollAndExpect asserts on the bodies delivered by one poll.
@@ -83,6 +88,13 @@ func TestPoll(t *testing.T) {
 	r.next = sink
 	pollAndExpect(r, "four")
 
+	// A restarted receiver resumes from the stored checkpoint.
+	require.NoError(t, r.storage.Close(t.Context()))
+	r = newStarted()
+	pollAndExpect(r)
+	write(os.O_APPEND, "five\n")
+	pollAndExpect(r, "five")
+
 	// A truncated file is read from the start.
 	write(os.O_TRUNC, "new\n")
 	pollAndExpect(r, "new")
@@ -91,6 +103,7 @@ func TestPoll(t *testing.T) {
 	require.NoError(t, os.Remove(file))
 	pollAndExpect(r)
 	require.Empty(t, r.files)
+	require.NoError(t, r.storage.Close(t.Context()))
 }
 
 // startSFTPServer serves the local filesystem over SFTP and returns its address

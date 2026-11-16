@@ -9,6 +9,7 @@ import (
 	"path"
 	"time"
 
+	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/config/configopaque"
 )
 
@@ -30,6 +31,8 @@ type Config struct {
 	Include []string `mapstructure:"include"`
 	// PollInterval is the time between two pulls.
 	PollInterval time.Duration `mapstructure:"poll_interval"`
+	// StorageID is the storage extension that keeps read offsets across restarts.
+	StorageID *component.ID `mapstructure:"storage"`
 }
 
 func (c *Config) Validate() error {

@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -19,6 +20,7 @@ import (
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/consumer"
 	"go.opentelemetry.io/collector/consumer/consumererror"
+	"go.opentelemetry.io/collector/extension/xextension/storage"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/receiver"
@@ -30,6 +32,7 @@ import (
 
 const (
 	transport    = "sftp"
+	filesKey     = "files"
 	dialTimeout  = 30 * time.Second
 	maxLineSize  = 1 << 20 // longer lines are split, like filelog's max_log_size
 	maxBatchSize = 1000    // log records per ConsumeLogs call
@@ -37,8 +40,8 @@ const (
 
 // fileState is the checkpoint of one remote file.
 type fileState struct {
-	Offset int64 // bytes already delivered
-	Size   int64 // size seen by the previous poll
+	Offset int64 `json:"offset"` // bytes already delivered
+	Size   int64 `json:"size"`   // size seen by the previous poll
 }
 
 type sftpReceiver struct {
@@ -47,8 +50,9 @@ type sftpReceiver struct {
 	next    consumer.Logs
 	obsrecv *receiverhelper.ObsReport
 
-	sshCfg *ssh.ClientConfig
-	files  map[string]fileState // only touched by the polling goroutine
+	sshCfg  *ssh.ClientConfig
+	storage storage.Client
+	files   map[string]fileState // only touched by the polling goroutine
 
 	cancel context.CancelFunc
 	done   chan struct{}
@@ -66,8 +70,8 @@ func newReceiver(cfg *Config, set receiver.Settings, next consumer.Logs) (*sftpR
 	return &sftpReceiver{cfg: cfg, set: set, next: next, obsrecv: obsrecv}, nil
 }
 
-func (r *sftpReceiver) Start(context.Context, component.Host) error {
-	if err := r.setup(); err != nil {
+func (r *sftpReceiver) Start(ctx context.Context, host component.Host) error {
+	if err := r.setup(ctx, host); err != nil {
 		return err
 	}
 	pollCtx, cancel := context.WithCancel(context.Background())
@@ -91,20 +95,37 @@ func (r *sftpReceiver) Start(context.Context, component.Host) error {
 	return nil
 }
 
-func (r *sftpReceiver) Shutdown(context.Context) error {
+func (r *sftpReceiver) Shutdown(ctx context.Context) error {
 	if r.cancel == nil {
 		return nil
 	}
 	r.cancel()
 	<-r.done
-	return nil
+	return r.storage.Close(ctx)
 }
 
-// setup prepares the SSH credentials and the file states.
-func (r *sftpReceiver) setup() (err error) {
+// setup prepares the SSH credentials and loads the checkpoints.
+func (r *sftpReceiver) setup(ctx context.Context, host component.Host) error {
+	var err error
+	if r.sshCfg, err = r.cfg.sshClientConfig(); err != nil {
+		return err
+	}
+	r.storage = storage.NewNopClient()
+	if id := r.cfg.StorageID; id != nil {
+		ext, ok := host.GetExtensions()[*id].(storage.Extension)
+		if !ok {
+			return fmt.Errorf("storage extension %q not found", id)
+		}
+		if r.storage, err = ext.GetClient(ctx, component.KindReceiver, r.set.ID, ""); err != nil {
+			return err
+		}
+	}
 	r.files = map[string]fileState{}
-	r.sshCfg, err = r.cfg.sshClientConfig()
-	return err
+	data, err := r.storage.Get(ctx, filesKey)
+	if err != nil || data == nil {
+		return err
+	}
+	return json.Unmarshal(data, &r.files)
 }
 
 func (c *Config) sshClientConfig() (*ssh.ClientConfig, error) {
@@ -209,13 +230,18 @@ func (r *sftpReceiver) poll(ctx context.Context) error {
 	}
 
 	// Forget a file only when the server confirms it no longer exists.
+	pruned := false
 	for p := range r.files {
 		if seen[p] {
 			continue
 		}
 		if _, err := client.Stat(p); errors.Is(err, os.ErrNotExist) {
 			delete(r.files, p)
+			pruned = true
 		}
+	}
+	if pruned {
+		errs = append(errs, r.checkpoint(ctx))
 	}
 	return errors.Join(errs...)
 }
@@ -273,7 +299,7 @@ func (r *sftpReceiver) readLines(ctx context.Context, client *sftp.Client, p str
 		st.Offset += pending
 		pending = 0
 		r.files[p] = st
-		return nil
+		return r.checkpoint(ctx)
 	}
 
 	now := pcommon.NewTimestampFromTime(time.Now())
@@ -322,4 +348,13 @@ func (r *sftpReceiver) consume(ctx context.Context, logs plog.Logs) error {
 		return nil
 	}
 	return err
+}
+
+func (r *sftpReceiver) checkpoint(ctx context.Context) error {
+	// ponytail: rewrites every checkpoint on each flush; use per-file keys if tens of thousands of files are tracked.
+	data, err := json.Marshal(r.files)
+	if err != nil {
+		return err
+	}
+	return r.storage.Set(ctx, filesKey, data)
 }

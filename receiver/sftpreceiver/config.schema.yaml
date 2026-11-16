@@ -24,5 +24,10 @@ properties:
     description: PollInterval is the time between two pulls.
     type: string
     format: duration
+  storage:
+    description: StorageID is the storage extension that keeps read offsets across restarts.
+    x-pointer: true
+    type: string
+    x-customType: go.opentelemetry.io/collector/component.ID
   username:
     type: string

@@ -3,6 +3,7 @@ module github.com/open-telemetry/opentelemetry-collector-contrib/receiver/sftpre
 go 1.25.0
 
 require (
+	github.com/open-telemetry/opentelemetry-collector-contrib/extension/storage v0.156.0
 	github.com/pkg/sftp v1.13.10
 	github.com/stretchr/testify v1.11.1
 	go.opentelemetry.io/collector/component v1.62.0
@@ -12,6 +13,7 @@ require (
 	go.opentelemetry.io/collector/consumer v1.62.0
 	go.opentelemetry.io/collector/consumer/consumererror v0.156.0
 	go.opentelemetry.io/collector/consumer/consumertest v0.156.0
+	go.opentelemetry.io/collector/extension/xextension v0.156.0
 	go.opentelemetry.io/collector/pdata v1.62.0
 	go.opentelemetry.io/collector/receiver v1.62.0
 	go.opentelemetry.io/collector/receiver/receiverhelper v0.156.0
@@ -42,6 +44,7 @@ require (
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/collector/consumer/xconsumer v0.156.0 // indirect
+	go.opentelemetry.io/collector/extension v1.62.0 // indirect
 	go.opentelemetry.io/collector/featuregate v1.62.0 // indirect
 	go.opentelemetry.io/collector/internal/componentalias v0.156.0 // indirect
 	go.opentelemetry.io/collector/pdata/pprofile v0.156.0 // indirect
@@ -61,3 +64,5 @@ require (
 	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
+
+replace github.com/open-telemetry/opentelemetry-collector-contrib/extension/storage => ../../extension/storage
