@@ -21,6 +21,14 @@ func TestConfigValidate(t *testing.T) {
 	require.Error(t, cfg.Validate())
 	cfg.Include = []string{"/logs/*.log"}
 
-	cfg.MaxLineLength = 15
+	cfg.MaxLineLength = 0
+	require.Error(t, cfg.Validate())
+	cfg.MaxLineLength = defaultLineLength
+
+	cfg.Encoding = "klingon"
+	require.Error(t, cfg.Validate())
+	cfg.Encoding = "utf-8"
+
+	cfg.Multiline.LineStartPattern, cfg.Multiline.LineEndPattern = "^a", "b$"
 	require.Error(t, cfg.Validate())
 }

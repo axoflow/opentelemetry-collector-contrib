@@ -3,6 +3,9 @@ properties:
   delete_after_read:
     description: DeleteAfterRead removes a remote file once it is fully delivered and stopped growing.
     type: boolean
+  encoding:
+    description: Encoding is the character set of the files, as in the filelog receiver.
+    type: string
   endpoint:
     description: Endpoint is the host:port of the SFTP server.
     type: string
@@ -21,8 +24,11 @@ properties:
     description: KnownHosts is the path to the known_hosts file used to verify the server.
     type: string
   max_line_length:
-    description: MaxLineLength is the longest line in bytes. Longer lines are split, so a file without newlines cannot exhaust memory.
+    description: MaxLineLength is the longest log record in bytes. Longer records are split, so a file without newlines cannot exhaust memory.
     type: integer
+  multiline:
+    description: Multiline groups several lines into one record, as in the filelog receiver.
+    $ref: /pkg/stanza/split.config
   password:
     description: Password authenticates the user, or decrypts KeyFile when both are set.
     $ref: go.opentelemetry.io/collector/config/configopaque.string
@@ -37,3 +43,5 @@ properties:
     x-customType: go.opentelemetry.io/collector/component.ID
   username:
     type: string
+allOf:
+  - $ref: /pkg/stanza/trim.config

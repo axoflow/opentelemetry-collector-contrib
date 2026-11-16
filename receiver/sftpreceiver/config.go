@@ -4,6 +4,7 @@
 package sftpreceiver // import "github.com/open-telemetry/opentelemetry-collector-contrib/receiver/sftpreceiver"
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
 	"path"
@@ -11,13 +12,14 @@ import (
 
 	"go.opentelemetry.io/collector/component"
 	"go.opentelemetry.io/collector/config/configopaque"
+	"golang.org/x/text/encoding"
+
+	"github.com/open-telemetry/opentelemetry-collector-contrib/internal/coreinternal/textutils"
+	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/stanza/split"
+	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/stanza/trim"
 )
 
-const (
-	defaultLineLength = 1 << 20
-	// minLineLength is the smallest buffer bufio.NewReaderSize honors.
-	minLineLength = 16
-)
+const defaultLineLength = 1 << 20
 
 type Config struct {
 	// Endpoint is the host:port of the SFTP server.
@@ -37,9 +39,15 @@ type Config struct {
 	Include []string `mapstructure:"include"`
 	// PollInterval is the time between two pulls.
 	PollInterval time.Duration `mapstructure:"poll_interval"`
-	// MaxLineLength is the longest line in bytes. Longer lines are split, so a file
-	// without newlines cannot exhaust memory.
+	// MaxLineLength is the longest log record in bytes. Longer records are split,
+	// so a file without newlines cannot exhaust memory.
 	MaxLineLength int `mapstructure:"max_line_length"`
+	// Encoding is the character set of the files, as in the filelog receiver.
+	Encoding string `mapstructure:"encoding"`
+	// Multiline groups several lines into one record, as in the filelog receiver.
+	Multiline split.Config `mapstructure:"multiline"`
+	// TrimConfig controls the whitespace removed around each record, as in the filelog receiver.
+	TrimConfig trim.Config `mapstructure:",squash"`
 	// DeleteAfterRead removes a remote file once it is fully delivered and stopped growing.
 	DeleteAfterRead bool `mapstructure:"delete_after_read"`
 	// StorageID is the storage extension that keeps read offsets across restarts.
@@ -71,8 +79,34 @@ func (c *Config) Validate() error {
 	if c.PollInterval <= 0 {
 		errs = append(errs, errors.New("poll_interval must be positive"))
 	}
-	if c.MaxLineLength < minLineLength {
-		errs = append(errs, fmt.Errorf("max_line_length must be at least %d", minLineLength))
+	if c.MaxLineLength <= 0 {
+		errs = append(errs, errors.New("max_line_length must be positive"))
+	}
+	if _, err := c.splitFunc(true); err != nil {
+		errs = append(errs, err)
 	}
 	return errors.Join(errs...)
+}
+
+// splitFunc cuts the records of a file. flushAtEOF also emits the last one,
+// which would otherwise wait for the start of the next record.
+func (c *Config) splitFunc(flushAtEOF bool) (bufio.SplitFunc, error) {
+	enc, err := c.encoding()
+	if err != nil {
+		return nil, err
+	}
+	if enc == encoding.Nop {
+		// ponytail: nop emits raw byte chunks regardless of line boundaries; add when someone pulls binary files.
+		return nil, errors.New("encoding nop is not supported")
+	}
+	splitFunc, err := c.Multiline.Func(enc, flushAtEOF, c.MaxLineLength)
+	if err != nil {
+		return nil, fmt.Errorf("multiline: %w", err)
+	}
+	// Same order as the filelog receiver: cut to length, then trim.
+	return trim.WithFunc(trim.ToLength(splitFunc, c.MaxLineLength), c.TrimConfig.Func()), nil
+}
+
+func (c *Config) encoding() (encoding.Encoding, error) {
+	return textutils.LookupEncoding(c.Encoding)
 }

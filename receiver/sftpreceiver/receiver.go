@@ -5,7 +5,6 @@ package sftpreceiver // import "github.com/open-telemetry/opentelemetry-collecto
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -280,7 +279,7 @@ func (r *sftpReceiver) readFile(ctx context.Context, client *sftp.Client, p stri
 	return r.checkpoint(ctx)
 }
 
-// readLines delivers the lines between the checkpoint of p and the size seen by this poll.
+// readLines delivers the records between the checkpoint of p and the size seen by this poll.
 func (r *sftpReceiver) readLines(ctx context.Context, client *sftp.Client, p string, idle bool) error {
 	st := r.files[p]
 	f, err := client.Open(p)
@@ -291,9 +290,25 @@ func (r *sftpReceiver) readLines(ctx context.Context, client *sftp.Client, p str
 	if _, err = f.Seek(st.Offset, io.SeekStart); err != nil {
 		return err
 	}
-	br := bufio.NewReaderSize(io.LimitReader(f, st.Size-st.Offset), r.cfg.MaxLineLength)
+	splitFunc, err := r.cfg.splitFunc(idle)
+	if err != nil {
+		return err
+	}
+	enc, err := r.cfg.encoding()
+	if err != nil {
+		return err
+	}
+	decoder := enc.NewDecoder()
 
-	var pending int64 // bytes read since the last flush
+	var pending int64 // bytes consumed since the last flush, including the current record
+	scanner := bufio.NewScanner(io.LimitReader(f, st.Size-st.Offset))
+	scanner.Buffer(make([]byte, 0, min(r.cfg.MaxLineLength, 64<<10)), r.cfg.MaxLineLength)
+	scanner.Split(func(data []byte, atEOF bool) (int, []byte, error) {
+		advance, token, err := splitFunc(data, atEOF)
+		pending += int64(advance)
+		return advance, token, err
+	})
+
 	logs, records := newLogs()
 	flush := func() error {
 		if records.Len() > 0 {
@@ -312,33 +327,27 @@ func (r *sftpReceiver) readLines(ctx context.Context, client *sftp.Client, p str
 	}
 
 	now := pcommon.NewTimestampFromTime(time.Now())
-	for {
-		// ErrBufferFull returns a max_line_length chunk of an oversized line.
-		line, err := br.ReadSlice('\n')
-		eof := errors.Is(err, io.EOF)
-		if err != nil && !eof && !errors.Is(err, bufio.ErrBufferFull) {
-			return errors.Join(err, flush())
+	// Without flushAtEOF, the split function holds back the last record of a file that may still grow.
+	for scanner.Scan() {
+		token := scanner.Bytes()
+		if len(token) == 0 {
+			continue
 		}
-		if eof && !idle {
-			break // the unterminated tail may still be growing
+		body, err := decoder.Bytes(token)
+		if err != nil {
+			body = []byte(strings.ToValidUTF8(string(token), "\uFFFD"))
 		}
-		pending += int64(len(line))
-		if body := bytes.TrimRight(line, "\r\n"); len(body) > 0 {
-			lr := records.AppendEmpty()
-			lr.SetObservedTimestamp(now)
-			lr.Body().SetStr(strings.ToValidUTF8(string(body), "\uFFFD"))
-			lr.Attributes().PutStr("log.file.path", p)
-		}
-		if eof {
-			break
-		}
+		lr := records.AppendEmpty()
+		lr.SetObservedTimestamp(now)
+		lr.Body().SetStr(string(body))
+		lr.Attributes().PutStr("log.file.path", p)
 		if records.Len() >= maxBatchSize {
 			if err := flush(); err != nil {
 				return err
 			}
 		}
 	}
-	return flush()
+	return errors.Join(scanner.Err(), flush())
 }
 
 func newLogs() (plog.Logs, plog.LogRecordSlice) {

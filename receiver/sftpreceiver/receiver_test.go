@@ -17,6 +17,7 @@ import (
 
 	"github.com/pkg/sftp"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/collector/component/componenttest"
 	"go.opentelemetry.io/collector/consumer/consumertest"
 	"go.opentelemetry.io/collector/receiver/receivertest"
 	"golang.org/x/crypto/ssh"
@@ -128,6 +129,48 @@ func TestPoll(t *testing.T) {
 	pollAndExpect(r)
 	require.NoFileExists(t, file)
 	require.NoError(t, r.storage.Close(t.Context()))
+}
+
+func TestPollRecords(t *testing.T) {
+	addr, knownHosts := startSFTPServer(t)
+	dir := t.TempDir()
+	cfg := NewFactory().CreateDefaultConfig().(*Config)
+	cfg.Endpoint, cfg.Username, cfg.Password, cfg.KnownHosts = addr, "otel", "secret", knownHosts
+	sink := new(consumertest.LogsSink)
+	newStarted := func() *sftpReceiver {
+		r, err := newReceiver(cfg, receivertest.NewNopSettings(metadata.Type), sink)
+		require.NoError(t, err)
+		require.NoError(t, r.setup(t.Context(), componenttest.NewNopHost()))
+		return r
+	}
+	pollAndExpect := func(r *sftpReceiver, want ...string) {
+		t.Helper()
+		sink.Reset()
+		require.NoError(t, r.poll(t.Context()))
+		var got []string
+		for _, logs := range sink.AllLogs() {
+			for _, lr := range logs.ResourceLogs().At(0).ScopeLogs().At(0).LogRecords().All() {
+				got = append(got, lr.Body().Str())
+			}
+		}
+		require.Equal(t, want, got)
+	}
+
+	// The last record is held back until the file stops growing.
+	cfg.Include = []string{filepath.Join(dir, "*.log")}
+	cfg.Multiline.LineStartPattern = `^\d`
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "app.log"), []byte("1 start\n  at a\n2 next\n  at b\n"), 0o600))
+	r := newStarted()
+	pollAndExpect(r, "1 start\n  at a")
+	pollAndExpect(r, "2 next\n  at b")
+
+	// Records are decoded and their surrounding whitespace is trimmed.
+	cfg.Include = []string{filepath.Join(dir, "*.txt")}
+	cfg.Multiline.LineStartPattern = ""
+	cfg.Encoding = "iso-8859-1"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "latin1.txt"), []byte("  caf\xe9  \n"), 0o600))
+	r = newStarted()
+	pollAndExpect(r, "café")
 }
 
 // startSFTPServer serves the local filesystem over SFTP and returns its address
