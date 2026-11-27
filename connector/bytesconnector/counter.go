@@ -10,8 +10,7 @@ import (
 
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/pmetric"
-
-	"github.com/open-telemetry/opentelemetry-collector-contrib/pkg/pdatautil"
+	"go.opentelemetry.io/collector/pdata/xpdata/xhash"
 )
 
 var noAttributes = [16]byte{}
@@ -85,7 +84,7 @@ func (c *counter[K]) increment(metricName string, attrs pcommon.Map, incrementVa
 
 	key := noAttributes
 	if attrs.Len() > 0 {
-		key = pdatautil.MapHash(attrs)
+		key = xhash.MapHash(attrs)
 	}
 
 	if _, ok := c.counts[metricName][key]; !ok {
